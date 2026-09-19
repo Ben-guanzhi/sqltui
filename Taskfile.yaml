@@ -1,0 +1,44 @@
+# https://taskfile.dev
+
+version: "3"
+silent: true
+
+tasks:
+  default:
+    cmds:
+      - ./sqltui
+    interactive: true
+    desc: Run
+    deps:
+      - build
+
+  build:
+    cmds:
+      - go build -ldflags "-X github.com/LinPr/sqltui/cmd.Version=$(git describe --tags --always --dirty)" .
+    desc: Build binary
+
+  lint:
+    desc: Run linters
+    cmds:
+      - golangci-lint run --path-mode=abs --timeout=5m
+
+  lint-fix:
+    desc: Run linters and fix issues
+    cmds:
+      - golangci-lint run --path-mode=abs --timeout=5m --fix
+
+  test:
+    desc: Run tests
+    cmds:
+      - go test -v ./...
+
+  fmt:
+    desc: Run go fmt
+    cmds:
+      - go fmt ./...
+
+  release:
+    desc: "Tag and push a release (usage: task release TAG=v1.2.3)"
+    cmds:
+      - "git tag {{.TAG}}"
+      - "git push origin {{.TAG}}"

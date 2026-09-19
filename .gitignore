@@ -1,0 +1,8 @@
+sqltui
+sqltui.exe
+sqltui.exe~
+*.log
+run.sh
+DESIGN.md
+docs/
+.claude/
