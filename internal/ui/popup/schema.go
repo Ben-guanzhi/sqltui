@@ -52,11 +52,7 @@ func (r schemaRow) selectable() bool {
 type schemaNsGroup struct {
 	ns        string
 	connected bool
-	open      bool
-	loading   bool
-	loaded    bool
-	errText   string
-	tables    []string
+	ui.LazyGroup[string]
 }
 
 // schemaOverlay browses all open tabs plus (in db mode) the live tables of
@@ -76,17 +72,15 @@ type schemaOverlay struct {
 	groups     []schemaNsGroup
 	connected  string // connected namespace ("" when unknown)
 
-	input     histInput // fuzzy filter text
-	filtering bool      // filter bar is visible and accepting input
-	cursor    int       // index into the last built rows
-	offset  int       // first visible row
-	viewLen int       // rows shown by the last View
+	input     ui.LineInput // fuzzy filter text
+	filtering bool         // filter bar is visible and accepting input
+	state     ui.ListState
 }
 
 // schemaNamespacesMsg delivers the async namespace listing (plus the eagerly
 // loaded tables of the connected namespace) to its overlay.
 type schemaNamespacesMsg struct {
-	owner     *schemaOverlay
+	ui.Owned[schemaOverlay]
 	nss       []string
 	connected string
 	err       error
@@ -99,14 +93,15 @@ type schemaNamespacesMsg struct {
 
 // schemaTablesMsg delivers one namespace's lazy table listing.
 type schemaTablesMsg struct {
-	owner  *schemaOverlay
+	ui.Owned[schemaOverlay]
 	ns     string
 	tables []string
 	err    error
 }
 
 func newSchemaOverlay(ctx ui.AppContext) *schemaOverlay {
-	o := &schemaOverlay{viewLen: 10, tabs: ctx.Tabs()}
+	o := &schemaOverlay{tabs: ctx.Tabs()}
+	o.state.ViewLen = 10
 	if be := ctx.Backend(); be != nil {
 		o.backend = be
 		o.beTitle = be.Title()
@@ -115,16 +110,16 @@ func newSchemaOverlay(ctx ui.AppContext) *schemaOverlay {
 
 	// Start on the active tab when possible, else the first selectable row.
 	rows := o.rows()
-	o.cursor = -1
+	o.state.Cursor = -1
 	active := ctx.ActiveTab()
 	for i, r := range rows {
 		if r.kind == schemaTab && r.tab == active {
-			o.cursor = i
+			o.state.Cursor = i
 			break
 		}
 	}
-	if o.cursor < 0 {
-		o.cursor = schemaNextSelectable(rows, -1, +1)
+	if o.state.Cursor < 0 {
+		o.state.Cursor = ui.NextSelectable(rows, -1, +1, schemaRow.selectable)
 	}
 	return o
 }
@@ -147,9 +142,9 @@ func (o *schemaOverlay) loadCmd() tea.Cmd {
 		return nil
 	}
 	return func() tea.Msg {
-		m := schemaNamespacesMsg{owner: o}
+		m := schemaNamespacesMsg{Owned: ui.Owned[schemaOverlay]{Owner: o}}
 		m.nss, m.err = be.Namespaces()
-		if cn, ok := be.(interface{ CurrentNamespace() string }); ok {
+		if cn, ok := be.(db.Namespaced); ok {
 			m.connected = cn.CurrentNamespace()
 		}
 		if eager, ok := schemaEagerNs(m.nss, m.connected); ok {
@@ -200,12 +195,7 @@ func (o *schemaOverlay) applyNamespaces(m schemaNamespacesMsg) {
 	for _, ns := range ordered {
 		g := schemaNsGroup{ns: ns, connected: ns == m.connected}
 		if m.hasEager && ns == m.eager {
-			g.open = true
-			g.loaded = true
-			g.tables = m.tables
-			if m.tablesErr != nil {
-				g.errText = m.tablesErr.Error()
-			}
+			g.LazyGroup = ui.LazyGroup[string]{Open: true, Loaded: true, Items: m.tables, Err: m.tablesErr}
 		}
 		o.groups = append(o.groups, g)
 	}
@@ -318,25 +308,25 @@ func (o *schemaOverlay) flatRows(pattern string) []schemaRow {
 	}
 	g := &o.groups[0]
 	switch {
-	case g.errText != "":
-		return []schemaRow{{kind: schemaNote, label: fmt.Sprintf("error: %s", g.errText)}}
-	case g.loading:
+	case g.Err != nil:
+		return []schemaRow{{kind: schemaNote, label: fmt.Sprintf("error: %s", g.Err)}}
+	case g.Loading:
 		return []schemaRow{{kind: schemaNote, label: "(loading …)"}}
-	case len(g.tables) == 0 && pattern == "":
+	case len(g.Items) == 0 && pattern == "":
 		return []schemaRow{{kind: schemaNote, label: "(no tables)"}}
 	}
 	var out []schemaRow
-	idx, pos := fuzzyMatches(pattern, g.tables)
+	idx, pos := fuzzyMatches(pattern, g.Items)
 	if pattern == "" {
 		// no filter: show all
-		idx = make([]int, len(g.tables))
+		idx = make([]int, len(g.Items))
 		for i := range idx {
 			idx[i] = i
 		}
 		pos = nil
 	}
 	for ii, i := range idx {
-		row := schemaRow{kind: schemaLive, label: g.tables[i], table: g.tables[i]}
+		row := schemaRow{kind: schemaLive, label: g.Items[i], table: g.Items[i]}
 		if pos != nil {
 			row.matchPos = pos[ii]
 		}
@@ -356,18 +346,18 @@ func (o *schemaOverlay) groupRows(pattern string) []schemaRow {
 		g := &o.groups[gi]
 		if pattern == "" {
 			out = append(out, schemaRow{kind: schemaGroup, label: schemaGroupLabel(g), group: gi})
-			if !g.open {
+			if !g.Open {
 				continue
 			}
 			switch {
-			case g.loading:
+			case g.Loading:
 				out = append(out, schemaRow{kind: schemaNote, label: "(loading …)"})
-			case g.errText != "":
-				out = append(out, schemaRow{kind: schemaNote, label: "error: " + g.errText})
-			case len(g.tables) == 0:
+			case g.Err != nil:
+				out = append(out, schemaRow{kind: schemaNote, label: "error: " + g.Err.Error()})
+			case len(g.Items) == 0:
 				out = append(out, schemaRow{kind: schemaNote, label: "(no tables)"})
 			default:
-				for _, t := range g.tables {
+				for _, t := range g.Items {
 					out = append(out, schemaRow{kind: schemaLive, label: t, ns: g.ns, table: t})
 				}
 			}
@@ -375,14 +365,14 @@ func (o *schemaOverlay) groupRows(pattern string) []schemaRow {
 		}
 
 		// Filtering: search loaded groups; flag unloaded ones.
-		if g.loaded {
-			idx, pos := fuzzyMatches(pattern, g.tables)
+		if g.Loaded {
+			idx, pos := fuzzyMatches(pattern, g.Items)
 			if len(idx) == 0 {
 				continue
 			}
 			out = append(out, schemaRow{kind: schemaHeader, label: schemaGroupLabel(g), group: gi})
 			for ii, i := range idx {
-				row := schemaRow{kind: schemaLive, label: g.tables[i], ns: g.ns, table: g.tables[i]}
+				row := schemaRow{kind: schemaLive, label: g.Items[i], ns: g.ns, table: g.Items[i]}
 				if pos != nil {
 					row.matchPos = pos[ii]
 				}
@@ -392,7 +382,7 @@ func (o *schemaOverlay) groupRows(pattern string) []schemaRow {
 		}
 		if len(fuzzyIndices(pattern, []string{g.ns})) > 0 {
 			label := "▸ " + g.ns + "  (not loaded — enter to load)"
-			if g.loading {
+			if g.Loading {
 				label = "▸ " + g.ns + "  (loading …)"
 			}
 			out = append(out, schemaRow{kind: schemaGroup, label: label, group: gi})
@@ -410,69 +400,35 @@ func (o *schemaOverlay) groupRows(pattern string) []schemaRow {
 // schemaGroupLabel renders a namespace group header for the unfiltered view.
 func schemaGroupLabel(g *schemaNsGroup) string {
 	marker := "▸"
-	if g.open {
+	if g.Open {
 		marker = "▾"
 	}
 	label := marker + " " + g.ns
 	if g.connected {
 		label += "  (connected)"
 	}
-	if !g.open {
+	if !g.Open {
 		label += "  (enter to expand)"
 	}
 	return label
 }
 
-// schemaNextSelectable returns the index of the next selectable row from i
-// in direction dir (+1/-1). When no selectable row exists in that direction
-// it returns -1 for a fresh scan (i < 0) or i itself otherwise.
-func schemaNextSelectable(rows []schemaRow, i, dir int) int {
-	for j := i + dir; j >= 0 && j < len(rows); j += dir {
-		if rows[j].selectable() {
-			return j
-		}
-	}
-	if i < 0 {
-		return -1
-	}
-	return i
-}
-
 // resetCursor puts the cursor on the first selectable row (after the filter
 // changed and the row list was rebuilt from scratch).
 func (o *schemaOverlay) resetCursor(rows []schemaRow) {
-	o.cursor = schemaNextSelectable(rows, -1, +1)
-	o.offset = 0
+	o.state.HomeToSelectable(len(rows), func(i int) bool { return rows[i].selectable() })
 }
 
 // clampCursor keeps the cursor on a selectable row after the rows changed
 // shape (async load arrived, group toggled).
 func (o *schemaOverlay) clampCursor(rows []schemaRow) {
-	if len(rows) == 0 {
-		o.cursor = -1
-		return
-	}
-	if o.cursor >= len(rows) {
-		o.cursor = len(rows) - 1
-	}
-	if o.cursor >= 0 && rows[o.cursor].selectable() {
-		return
-	}
-	if j := schemaNextSelectable(rows, o.cursor, +1); j >= 0 && j < len(rows) && rows[j].selectable() {
-		o.cursor = j
-		return
-	}
-	if j := schemaNextSelectable(rows, o.cursor, -1); j >= 0 && j < len(rows) && rows[j].selectable() {
-		o.cursor = j
-		return
-	}
-	o.cursor = schemaNextSelectable(rows, -1, +1)
+	ui.ClampListCursor(&o.state, rows, schemaRow.selectable)
 }
 
 func (o *schemaOverlay) Update(msg tea.Msg) (ui.Overlay, tea.Cmd) {
 	switch m := msg.(type) {
 	case schemaNamespacesMsg:
-		if m.owner != o {
+		if m.Stale(o) {
 			return o, nil // stale result from a closed instance
 		}
 		o.applyNamespaces(m)
@@ -482,7 +438,7 @@ func (o *schemaOverlay) Update(msg tea.Msg) (ui.Overlay, tea.Cmd) {
 		return o, nil
 
 	case schemaTablesMsg:
-		if m.owner != o {
+		if m.Stale(o) {
 			return o, nil
 		}
 		for i := range o.groups {
@@ -490,13 +446,7 @@ func (o *schemaOverlay) Update(msg tea.Msg) (ui.Overlay, tea.Cmd) {
 			if g.ns != m.ns {
 				continue
 			}
-			g.loading = false
-			g.loaded = true
-			if m.err != nil {
-				g.errText = m.err.Error()
-			} else {
-				g.tables = m.tables
-			}
+			g.Deliver(m.tables, m.err)
 		}
 		rows := o.rows()
 		o.clampCursor(rows)
@@ -514,7 +464,7 @@ func (o *schemaOverlay) Update(msg tea.Msg) (ui.Overlay, tea.Cmd) {
 		// First esc: stop filtering and clear input. Second esc: close.
 		if o.filtering || o.input.String() != "" {
 			o.filtering = false
-			o.input = histInput{}
+			o.input = ui.LineInput{}
 			o.resetCursor(o.rows())
 			return o, nil
 		}
@@ -522,9 +472,9 @@ func (o *schemaOverlay) Update(msg tea.Msg) (ui.Overlay, tea.Cmd) {
 	case "ctrl+c":
 		return o, ui.CloseOverlay
 	case "up", "ctrl+p":
-		o.cursor = schemaNextSelectable(rows, o.cursor, -1)
+		o.state.Cursor = ui.NextSelectable(rows, o.state.Cursor, -1, schemaRow.selectable)
 	case "down", "ctrl+n":
-		o.cursor = schemaNextSelectable(rows, o.cursor, +1)
+		o.state.Cursor = ui.NextSelectable(rows, o.state.Cursor, +1, schemaRow.selectable)
 	case "pgup":
 		o.movePage(rows, -1)
 	case "pgdown":
@@ -587,25 +537,25 @@ func (o *schemaOverlay) Fullscreen() bool { return o.fullscreen }
 // movePage jumps the cursor by one window height, snapping to a selectable
 // row in the same direction (falling back to the opposite one at the ends).
 func (o *schemaOverlay) movePage(rows []schemaRow, dir int) {
-	target := o.cursor + dir*max(1, o.viewLen)
+	target := o.state.Cursor + dir*max(1, o.state.ViewLen)
 	target = schemaClamp(target, 0, len(rows)-1)
 	if target >= 0 && target < len(rows) && rows[target].selectable() {
-		o.cursor = target
+		o.state.Cursor = target
 		return
 	}
-	if next := schemaNextSelectable(rows, target, dir); next >= 0 && next < len(rows) && rows[next].selectable() {
-		o.cursor = next
+	if next := ui.NextSelectable(rows, target, dir, schemaRow.selectable); next >= 0 && next < len(rows) && rows[next].selectable() {
+		o.state.Cursor = next
 		return
 	}
-	o.cursor = schemaNextSelectable(rows, target, -dir)
+	o.state.Cursor = ui.NextSelectable(rows, target, -dir, schemaRow.selectable)
 }
 
 // activate returns the command for the row under the cursor.
 func (o *schemaOverlay) activate(rows []schemaRow) tea.Cmd {
-	if o.cursor < 0 || o.cursor >= len(rows) {
+	if o.state.Cursor < 0 || o.state.Cursor >= len(rows) {
 		return nil
 	}
-	r := rows[o.cursor]
+	r := rows[o.state.Cursor]
 	switch r.kind {
 	case schemaTab:
 		idx := r.tab
@@ -635,39 +585,43 @@ func (o *schemaOverlay) toggleGroup(gi int) tea.Cmd {
 		return nil
 	}
 	g := &o.groups[gi]
-	if g.open && o.pattern() == "" {
-		g.open = false
+	if g.Open && o.pattern() == "" {
+		g.Open = false
 		return nil
 	}
-	g.open = true
-	if g.loaded || g.loading {
-		return nil
-	}
-	g.loading = true
+	g.Open = true
 	be, ns := o.backend, g.ns
-	return func() tea.Msg {
-		tables, err := be.Tables(ns)
-		return schemaTablesMsg{owner: o, ns: ns, tables: tables, err: err}
-	}
+	return g.EnsureLoaded(func() tea.Cmd {
+		return func() tea.Msg {
+			tables, err := be.Tables(ns)
+			return schemaTablesMsg{
+				Owned: ui.Owned[schemaOverlay]{Owner: o},
+				ns:    ns, tables: tables, err: err,
+			}
+		}
+	})
 }
 
-// scrollToCursor keeps the cursor inside the visible window.
+// scrollToCursor keeps the cursor inside the visible window. Unlike
+// ui.ListState.ScrollToCursor it also pulls the section header directly
+// above the cursor into view when the cursor moves up, so a live table
+// never renders detached from its group header.
 func (o *schemaOverlay) scrollToCursor(rows []schemaRow) {
-	if o.cursor < 0 {
+	if o.state.Cursor < 0 {
 		return
 	}
-	vl := max(1, o.viewLen)
-	if o.cursor < o.offset {
-		o.offset = o.cursor
+	vl := max(1, o.state.ViewLen)
+	if o.state.Cursor < o.state.Offset {
+		o.state.Offset = o.state.Cursor
 		// Pull a section header directly above the cursor into view.
-		if o.offset > 0 && !rows[o.offset-1].selectable() {
-			o.offset--
+		if o.state.Offset > 0 && !rows[o.state.Offset-1].selectable() {
+			o.state.Offset--
 		}
 	}
-	if o.cursor >= o.offset+vl {
-		o.offset = o.cursor - vl + 1
+	if o.state.Cursor >= o.state.Offset+vl {
+		o.state.Offset = o.state.Cursor - vl + 1
 	}
-	o.offset = schemaClamp(o.offset, 0, max(0, len(rows)-vl))
+	o.state.Offset = schemaClamp(o.state.Offset, 0, max(0, len(rows)-vl))
 }
 
 func (o *schemaOverlay) View(width, height int, th *theme.Theme) string {
@@ -698,8 +652,8 @@ func (o *schemaOverlay) View(width, height int, th *theme.Theme) string {
 	if !o.fullscreen && avail > len(rows) {
 		avail = len(rows)
 	}
-	o.viewLen = max(1, avail)
-	o.offset = schemaClamp(o.offset, 0, max(0, len(rows)-o.viewLen))
+	o.state.ViewLen = max(1, avail)
+	o.state.Offset = schemaClamp(o.state.Offset, 0, max(0, len(rows)-o.state.ViewLen))
 
 	var lines []string
 	if filterVisible {
@@ -708,32 +662,32 @@ func (o *schemaOverlay) View(width, height int, th *theme.Theme) string {
 	if len(rows) == 0 {
 		lines = append(lines, th.Placeholder.Render("  no matches"))
 	}
-	for i := o.offset; i < o.offset+o.viewLen && i < len(rows); i++ {
+	for i := o.state.Offset; i < o.state.Offset+o.state.ViewLen && i < len(rows); i++ {
 		r := rows[i]
 		switch {
 		case r.kind == schemaHeader:
 			lines = append(lines, th.PopupTitle.Render(ansi.Truncate(" "+r.label, inner, "…")))
 		case r.kind == schemaNote:
 			lines = append(lines, th.Subtle.Render(ansi.Truncate("   "+r.label, inner, "…")))
-		case r.kind == schemaGroup && i == o.cursor:
+		case r.kind == schemaGroup && i == o.state.Cursor:
 			if r.matchPos != nil {
 				highlighted := ui.HighlightRunes(r.label, r.matchPos, th.Match, th.ListSelected)
 				prefix := th.ListSelected.Render(" ")
 				pad := max(0, inner-1-ansi.StringWidth(r.label))
 				lines = append(lines, prefix+highlighted+th.ListSelected.Render(strings.Repeat(" ", pad)))
 			} else {
-				lines = append(lines, th.ListSelected.Render(schemaPad(" "+r.label, inner)))
+				lines = append(lines, th.ListSelected.Render(ui.Pad(" "+r.label, inner)))
 			}
 		case r.kind == schemaGroup:
 			lines = append(lines, th.PopupTitle.Render(ansi.Truncate(" "+r.label, inner, "…")))
-		case i == o.cursor:
+		case i == o.state.Cursor:
 			if r.matchPos != nil {
 				highlighted := ui.HighlightRunes(r.label, r.matchPos, th.Match, th.ListSelected)
 				prefix := th.ListSelected.Render(" > ")
 				pad := max(0, inner-3-ansi.StringWidth(r.label))
 				lines = append(lines, prefix+highlighted+th.ListSelected.Render(strings.Repeat(" ", pad)))
 			} else {
-				lines = append(lines, th.ListSelected.Render(schemaPad(" > "+r.label, inner)))
+				lines = append(lines, th.ListSelected.Render(ui.Pad(" > "+r.label, inner)))
 			}
 		default:
 			if r.matchPos != nil {
@@ -742,7 +696,7 @@ func (o *schemaOverlay) View(width, height int, th *theme.Theme) string {
 				pad := max(0, inner-3-ansi.StringWidth(r.label))
 				lines = append(lines, prefix+highlighted+th.ListItem.Render(strings.Repeat(" ", pad)))
 			} else {
-				lines = append(lines, th.ListItem.Render(schemaPad("   "+r.label, inner)))
+				lines = append(lines, th.ListItem.Render(ui.Pad("   "+r.label, inner)))
 			}
 		}
 	}
@@ -750,7 +704,7 @@ func (o *schemaOverlay) View(width, height int, th *theme.Theme) string {
 	// Full page: pad the listing with blank rows so the frame keeps its
 	// fixed height even when there are few entries.
 	if o.fullscreen {
-		for len(lines) < o.viewLen {
+		for len(lines) < o.state.ViewLen {
 			lines = append(lines, "")
 		}
 	}
@@ -765,22 +719,13 @@ func (o *schemaOverlay) View(width, height int, th *theme.Theme) string {
 	if o.input.String() != "" && !o.filtering {
 		hint = " enter open  •  esc clear filter"
 	}
-	if len(rows) > o.viewLen {
+	if len(rows) > o.state.ViewLen {
 		hint = fmt.Sprintf(" %d-%d of %d  • %s",
-			o.offset+1, min(o.offset+o.viewLen, len(rows)), len(rows), strings.TrimPrefix(hint, " "))
+			o.state.Offset+1, min(o.state.Offset+o.state.ViewLen, len(rows)), len(rows), strings.TrimPrefix(hint, " "))
 	}
 	lines = append(lines, th.Subtle.Render(hint))
 
 	return ui.Box("schema", strings.Join(lines, "\n"), boxW, th)
-}
-
-// schemaPad truncates or pads s to exactly w display cells.
-func schemaPad(s string, w int) string {
-	s = ansi.Truncate(s, w, "…")
-	if pad := w - ansi.StringWidth(s); pad > 0 {
-		s += strings.Repeat(" ", pad)
-	}
-	return s
 }
 
 func schemaClamp(v, lo, hi int) int {

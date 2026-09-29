@@ -55,6 +55,20 @@ func init() {
 	}
 }
 
+// RegisterCommand wires one palette-visible command into both registries at
+// once: the ui.Factories dispatch map and the palette Commands table (added
+// idempotently by name). Use it instead of a raw Factories assignment plus a
+// separate Commands append, so dispatch and the palette entry cannot drift.
+func RegisterCommand(c Command, f func(ctx ui.AppContext, arg string) (ui.Overlay, error)) {
+	ui.Factories[c.Name] = f
+	for _, x := range Commands {
+		if x.Name == c.Name {
+			return
+		}
+	}
+	Commands = append(Commands, c)
+}
+
 // paletteEntry is one fuzzy-matchable string mapped back to its command.
 type paletteEntry struct {
 	text string
@@ -121,16 +135,15 @@ func paletteFilter(pattern string) []int {
 // palette is the command palette overlay: an input line plus a fuzzy-filtered
 // command list.
 type palette struct {
-	input    []rune
-	cursor   int
+	input    ui.LineInput
 	filtered []int // indices into Commands
 	sel      int   // selection within filtered
 	offset   int   // list scroll offset
 }
 
 func newPalette(prefill string) *palette {
-	p := &palette{input: []rune(prefill)}
-	p.cursor = len(p.input)
+	p := &palette{input: ui.NewLineInput(prefill)}
+	p.input.Placeholder = "type a command"
 	p.refilter()
 	return p
 }
@@ -138,7 +151,7 @@ func newPalette(prefill string) *palette {
 func (p *palette) refilter() {
 	// Filter on the command token only, so "filter age > 30" keeps the
 	// filter command highlighted while the argument is typed.
-	token := string(p.input)
+	token := p.input.String()
 	if i := strings.IndexByte(token, ' '); i >= 0 {
 		token = token[:i]
 	}
@@ -150,7 +163,7 @@ func (p *palette) refilter() {
 // dispatchTarget computes what pressing enter would run: the resolved first
 // token (with the remainder as the argument) or the current list selection.
 func (p *palette) dispatchTarget() (name, arg string, ok bool) {
-	text := string(p.input)
+	text := p.input.String()
 	token, rest := text, ""
 	if i := strings.IndexByte(text, ' '); i >= 0 {
 		token, rest = text[:i], strings.TrimSpace(text[i+1:])
@@ -181,16 +194,14 @@ func paletteDispatch(name, arg string) tea.Cmd {
 // prompt immediately for a fluid feel; the returned command is non-nil in
 // that case.
 func (p *palette) insertText(text string) tea.Cmd {
-	if text == " " && p.cursor == len(p.input) {
-		if tok := string(p.input); len([]rune(tok)) == 1 {
+	if text == " " && p.input.Cursor() == p.input.Len() {
+		if tok := p.input.String(); len([]rune(tok)) == 1 {
 			if name, ok := paletteResolve(tok); ok {
 				return paletteDispatch(name, "")
 			}
 		}
 	}
-	rs := []rune(text)
-	p.input = append(p.input[:p.cursor], append(rs, p.input[p.cursor:]...)...)
-	p.cursor += len(rs)
+	p.input.Insert(text)
 	p.refilter()
 	return nil
 }
@@ -199,12 +210,9 @@ func (p *palette) insertText(text string) tea.Cmd {
 // deliberately bypasses insertText's alias-space dispatch: a paste is one
 // edit, never an implicit enter.
 func (p *palette) paste(content string) {
-	rs := []rune(pasteSanitize(content))
-	if len(rs) == 0 {
+	if !p.input.Paste(content) {
 		return
 	}
-	p.input = append(p.input[:p.cursor], append(rs, p.input[p.cursor:]...)...)
-	p.cursor += len(rs)
 	p.refilter()
 }
 
@@ -236,37 +244,29 @@ func (p *palette) Update(msg tea.Msg) (ui.Overlay, tea.Cmd) {
 		}
 		return p, nil
 	case "backspace":
-		if p.cursor > 0 {
-			p.input = append(p.input[:p.cursor-1], p.input[p.cursor:]...)
-			p.cursor--
+		if p.input.Backspace() {
 			p.refilter()
 		}
 		return p, nil
 	case "delete":
-		if p.cursor < len(p.input) {
-			p.input = append(p.input[:p.cursor], p.input[p.cursor+1:]...)
+		if p.input.Delete() {
 			p.refilter()
 		}
 		return p, nil
 	case "left":
-		if p.cursor > 0 {
-			p.cursor--
-		}
+		p.input.Left()
 		return p, nil
 	case "right":
-		if p.cursor < len(p.input) {
-			p.cursor++
-		}
+		p.input.Right()
 		return p, nil
 	case "home", "ctrl+a":
-		p.cursor = 0
+		p.input.Home()
 		return p, nil
 	case "end", "ctrl+e":
-		p.cursor = len(p.input)
+		p.input.End()
 		return p, nil
 	case "ctrl+u":
-		p.input = append([]rune(nil), p.input[p.cursor:]...)
-		p.cursor = 0
+		p.input.CtrlU()
 		p.refilter()
 		return p, nil
 	}
@@ -280,24 +280,10 @@ func (p *palette) View(width, height int, th *theme.Theme) string {
 	w := paletteClamp(width-4, 24, 70)
 	inner := w - 2
 
-	// Input line with a block cursor.
+	// Input line with a block cursor (placeholder shows while empty).
 	var in strings.Builder
 	in.WriteString(th.Subtle.Render(" > "))
-	before := string(p.input[:p.cursor])
-	under := " "
-	after := ""
-	if p.cursor < len(p.input) {
-		under = string(p.input[p.cursor])
-		after = string(p.input[p.cursor+1:])
-	}
-	if len(p.input) == 0 {
-		in.WriteString(th.ListSelected.Render(" "))
-		in.WriteString(th.Placeholder.Render("type a command"))
-	} else {
-		in.WriteString(th.Input.Render(before))
-		in.WriteString(th.ListSelected.Render(under))
-		in.WriteString(th.Input.Render(after))
-	}
+	in.WriteString(p.input.Render(th))
 
 	// Visible list window.
 	listH := paletteClamp(height-8, 3, 12)

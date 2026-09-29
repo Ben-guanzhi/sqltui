@@ -28,22 +28,22 @@ func TestOpenTableFactorySuccess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("factory: %v", err)
 	}
-	loader, ok := ov.(*tableLoader)
+	loader, ok := ov.(*ui.TableLoader)
 	if !ok {
-		t.Fatalf("factory returned %T, want *tableLoader", ov)
+		t.Fatalf("factory returned %T, want *ui.TableLoader", ov)
 	}
 
 	// Init kicks off the async fetch with the decoded ns/table and the limit.
 	msg := runCmd(loader.Init())
-	loaded, ok := msg.(tableLoadedMsg)
+	loaded, ok := msg.(ui.TableLoadedMsg)
 	if !ok {
-		t.Fatalf("Init produced %T, want tableLoadedMsg", msg)
+		t.Fatalf("Init produced %T, want ui.TableLoadedMsg", msg)
 	}
-	if be.fetchNS != "public" || be.fetchTable != "users" || be.fetchLimit != fetchLimit {
+	if be.fetchNS != "public" || be.fetchTable != "users" || be.fetchLimit != ui.TableFetchLimit {
 		t.Fatalf("FetchTable(%q, %q, %d), want (public, users, %d)",
-			be.fetchNS, be.fetchTable, be.fetchLimit, fetchLimit)
+			be.fetchNS, be.fetchTable, be.fetchLimit, ui.TableFetchLimit)
 	}
-	if loaded.err != nil || loaded.frame != frame {
+	if loaded.Err != nil || loaded.Frame != frame {
 		t.Fatalf("unexpected load result: %+v", loaded)
 	}
 
@@ -51,9 +51,9 @@ func TestOpenTableFactorySuccess(t *testing.T) {
 	if _, cmd := loader.Update(loaded); cmd == nil {
 		t.Fatal("loaded message produced no command")
 	}
-	cmds := loader.resultCmds(loaded)
+	cmds := loader.ResultCmds(loaded)
 	if len(cmds) != 2 {
-		t.Fatalf("resultCmds returned %d commands, want 2", len(cmds))
+		t.Fatalf("ResultCmds returned %d commands, want 2", len(cmds))
 	}
 	if _, ok := runCmd(cmds[0]).(ui.CloseOverlayMsg); !ok {
 		t.Fatal("first command must close the loading overlay")
@@ -73,15 +73,15 @@ func TestOpenTableFactoryFetchError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("factory: %v", err)
 	}
-	loader := ov.(*tableLoader)
+	loader := ov.(*ui.TableLoader)
 
-	loaded := runCmd(loader.Init()).(tableLoadedMsg)
-	if loaded.err == nil {
+	loaded := runCmd(loader.Init()).(ui.TableLoadedMsg)
+	if loaded.Err == nil {
 		t.Fatal("expected fetch error")
 	}
-	cmds := loader.resultCmds(loaded)
+	cmds := loader.ResultCmds(loaded)
 	if len(cmds) != 2 {
-		t.Fatalf("resultCmds returned %d commands, want 2", len(cmds))
+		t.Fatalf("ResultCmds returned %d commands, want 2", len(cmds))
 	}
 	if _, ok := runCmd(cmds[0]).(ui.CloseOverlayMsg); !ok {
 		t.Fatal("first command must close the loading overlay")
@@ -93,7 +93,7 @@ func TestOpenTableFactoryFetchError(t *testing.T) {
 }
 
 func TestTableLoaderEscCloses(t *testing.T) {
-	loader := &tableLoader{be: &fakeBackend{}, table: "users"}
+	loader := ui.NewTableLoader(nil, &fakeBackend{}, "", "users", false)
 	_, cmd := loader.Update(keyPress("esc"))
 	if _, ok := runCmd(cmd).(ui.CloseOverlayMsg); !ok {
 		t.Fatal("esc must close the loading overlay")

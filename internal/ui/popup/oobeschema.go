@@ -20,8 +20,8 @@ func NewOobeSchemaOverlay(ctx ui.AppContext) ui.Overlay {
 	o := &oobeSchemaOverlay{
 		ctx:     ctx,
 		backend: be,
-		viewLen: 20,
 	}
+	o.state.ViewLen = 20
 	// all groups open by default
 	o.open[groupLogs] = true
 	o.open[groupMetrics] = true
@@ -66,15 +66,12 @@ func (r oobeRow) selectable() bool {
 		r.kind == oobeRowFolder || r.kind == oobeRowDashboard
 }
 
-// dashFolder holds state for one folder in the Dashboards group.
+// dashFolder holds state for one folder in the Dashboards group. Its
+// dashboards load lazily on first expansion.
 type dashFolder struct {
-	folderID   string
-	name       string
-	open       bool
-	loading    bool
-	loaded     bool
-	dashboards []oobe.DashboardInfo
-	err        string
+	folderID string
+	name     string
+	ui.LazyGroup[oobe.DashboardInfo]
 }
 
 type oobeSchemaOverlay struct {
@@ -84,38 +81,30 @@ type oobeSchemaOverlay struct {
 	open [4]bool
 
 	// Logs
-	streamsLoading bool
-	streamsLoaded  bool
-	streams        []string
-	streamsErr     string
+	streams ui.LazyGroup[string]
 
 	// Dashboards (two-level: folder → dashboard)
-	foldersLoading bool
-	foldersLoaded  bool
-	folders        []dashFolder
-	foldersErr     string
+	folders ui.LazyGroup[dashFolder]
 
-	cursor  int
-	offset  int
-	viewLen int
+	state ui.ListState
 }
 
 // ─── async messages ────────────────────────────────────────────────────────────
 
 type oobeStreamsMsg struct {
-	owner   *oobeSchemaOverlay
+	ui.Owned[oobeSchemaOverlay]
 	streams []string
 	err     error
 }
 
 type oobeFoldersMsg struct {
-	owner   *oobeSchemaOverlay
+	ui.Owned[oobeSchemaOverlay]
 	folders []dashFolder
 	err     error
 }
 
 type oobeFolderDashboardsMsg struct {
-	owner      *oobeSchemaOverlay
+	ui.Owned[oobeSchemaOverlay]
 	folderID   string
 	dashboards []oobe.DashboardInfo
 	err        error
@@ -128,56 +117,57 @@ func (o *oobeSchemaOverlay) Init() tea.Cmd {
 }
 
 func (o *oobeSchemaOverlay) loadStreams() tea.Cmd {
-	if o.streamsLoading || o.streamsLoaded {
-		return nil
-	}
-	o.streamsLoading = true
 	be := o.backend
 	org := be.CurrentNamespace()
 	owner := o
-	return func() tea.Msg {
-		streams, err := be.Tables(org)
-		return oobeStreamsMsg{owner: owner, streams: streams, err: err}
-	}
+	return o.streams.EnsureLoaded(func() tea.Cmd {
+		return func() tea.Msg {
+			streams, err := be.Tables(org)
+			return oobeStreamsMsg{
+				Owned:   ui.Owned[oobeSchemaOverlay]{Owner: owner},
+				streams: streams, err: err,
+			}
+		}
+	})
 }
 
 func (o *oobeSchemaOverlay) loadFolders() tea.Cmd {
-	if o.foldersLoading || o.foldersLoaded {
-		return nil
-	}
-	o.foldersLoading = true
 	be := o.backend
 	owner := o
-	return func() tea.Msg {
-		infos, err := be.ListFolders()
-		if err != nil {
-			return oobeFoldersMsg{owner: owner, err: err}
+	return o.folders.EnsureLoaded(func() tea.Cmd {
+		return func() tea.Msg {
+			infos, err := be.ListFolders()
+			if err != nil {
+				return oobeFoldersMsg{Owned: ui.Owned[oobeSchemaOverlay]{Owner: owner}, err: err}
+			}
+			folders := make([]dashFolder, len(infos))
+			for i, f := range infos {
+				folders[i] = dashFolder{folderID: f.FolderID, name: f.Name}
+			}
+			return oobeFoldersMsg{Owned: ui.Owned[oobeSchemaOverlay]{Owner: owner}, folders: folders}
 		}
-		folders := make([]dashFolder, len(infos))
-		for i, f := range infos {
-			folders[i] = dashFolder{folderID: f.FolderID, name: f.Name}
-		}
-		return oobeFoldersMsg{owner: owner, folders: folders}
-	}
+	})
 }
 
 func (o *oobeSchemaOverlay) loadFolderDashboards(i int) tea.Cmd {
-	if i < 0 || i >= len(o.folders) {
+	if i < 0 || i >= len(o.folders.Items) {
 		return nil
 	}
-	f := &o.folders[i]
-	if f.loading || f.loaded {
-		return nil
-	}
-	f.loading = true
+	f := &o.folders.Items[i]
 	be := o.backend
 	folderID := f.folderID
 	folderName := f.name
 	owner := o
-	return func() tea.Msg {
-		dashes, err := be.ListDashboardsInFolder(folderID, folderName)
-		return oobeFolderDashboardsMsg{owner: owner, folderID: folderID, dashboards: dashes, err: err}
-	}
+	return f.EnsureLoaded(func() tea.Cmd {
+		return func() tea.Msg {
+			dashes, err := be.ListDashboardsInFolder(folderID, folderName)
+			return oobeFolderDashboardsMsg{
+				Owned:      ui.Owned[oobeSchemaOverlay]{Owner: owner},
+				folderID:   folderID,
+				dashboards: dashes, err: err,
+			}
+		}
+	})
 }
 
 // ─── Update ───────────────────────────────────────────────────────────────────
@@ -185,47 +175,26 @@ func (o *oobeSchemaOverlay) loadFolderDashboards(i int) tea.Cmd {
 func (o *oobeSchemaOverlay) Update(msg tea.Msg) (ui.Overlay, tea.Cmd) {
 	switch m := msg.(type) {
 	case oobeStreamsMsg:
-		if m.owner != o {
+		if m.Stale(o) {
 			return o, nil
 		}
-		o.streamsLoading = false
-		o.streamsLoaded = true
-		if m.err != nil {
-			o.streamsErr = m.err.Error()
-		} else {
-			o.streams = m.streams
-			o.streamsErr = ""
-		}
+		o.streams.Deliver(m.streams, m.err)
 		return o, nil
 
 	case oobeFoldersMsg:
-		if m.owner != o {
+		if m.Stale(o) {
 			return o, nil
 		}
-		o.foldersLoading = false
-		o.foldersLoaded = true
-		if m.err != nil {
-			o.foldersErr = m.err.Error()
-		} else {
-			o.folders = m.folders
-			o.foldersErr = ""
-		}
+		o.folders.Deliver(m.folders, m.err)
 		return o, nil
 
 	case oobeFolderDashboardsMsg:
-		if m.owner != o {
+		if m.Stale(o) {
 			return o, nil
 		}
-		for i := range o.folders {
-			if o.folders[i].folderID == m.folderID {
-				o.folders[i].loading = false
-				o.folders[i].loaded = true
-				if m.err != nil {
-					o.folders[i].err = m.err.Error()
-				} else {
-					o.folders[i].dashboards = m.dashboards
-					o.folders[i].err = ""
-				}
+		for i := range o.folders.Items {
+			if o.folders.Items[i].folderID == m.folderID {
+				o.folders.Items[i].Deliver(m.dashboards, m.err)
 				break
 			}
 		}
@@ -244,37 +213,30 @@ func (o *oobeSchemaOverlay) handleKey(msg tea.KeyPressMsg) (ui.Overlay, tea.Cmd)
 	case "esc", "q":
 		return o, func() tea.Msg { return ui.RunCommandMsg{Name: "connect"} }
 	case "up", "k":
-		o.cursor = oobePrevSelectable(rows, o.cursor)
+		o.state.Cursor = ui.NextSelectable(rows, o.state.Cursor, -1, oobeRow.selectable)
 		o.edgeFollow(rows)
 	case "down", "j":
-		o.cursor = oobeNextSelectable(rows, o.cursor)
+		o.state.Cursor = ui.NextSelectable(rows, o.state.Cursor, +1, oobeRow.selectable)
 		o.edgeFollow(rows)
 	case "r":
 		var cmds []tea.Cmd
 		if o.open[groupLogs] {
-			o.streamsLoaded = false
-			o.streamsLoading = false
-			o.streamsErr = ""
+			o.streams.Reset()
 			cmds = append(cmds, o.loadStreams())
 		}
 		if o.open[groupDashboards] {
-			o.foldersLoaded = false
-			o.foldersLoading = false
-			o.foldersErr = ""
-			for i := range o.folders {
-				o.folders[i].loaded = false
-				o.folders[i].loading = false
-				o.folders[i].err = ""
-				o.folders[i].dashboards = nil
+			o.folders.Reset()
+			for i := range o.folders.Items {
+				o.folders.Items[i].Reset()
 			}
 			cmds = append(cmds, o.loadFolders())
 		}
 		return o, tea.Batch(cmds...)
 	case "enter", " ":
-		if o.cursor < 0 || o.cursor >= len(rows) {
+		if o.state.Cursor < 0 || o.state.Cursor >= len(rows) {
 			return o, nil
 		}
-		r := rows[o.cursor]
+		r := rows[o.state.Cursor]
 		switch r.kind {
 		case oobeRowGroup:
 			o.open[r.group] = !o.open[r.group]
@@ -287,9 +249,9 @@ func (o *oobeSchemaOverlay) handleKey(msg tea.KeyPressMsg) (ui.Overlay, tea.Cmd)
 				}
 			}
 		case oobeRowFolder:
-			f := &o.folders[r.folderIdx]
-			f.open = !f.open
-			if f.open {
+			f := &o.folders.Items[r.folderIdx]
+			f.Open = !f.Open
+			if f.Open {
 				return o, o.loadFolderDashboards(r.folderIdx)
 			}
 		case oobeRowStream:
@@ -326,29 +288,32 @@ func (o *oobeSchemaOverlay) rows() []oobeRow {
 		}
 		switch g {
 		case groupLogs:
-			if o.streamsLoading {
+			switch {
+			case o.streams.Loading:
 				rows = append(rows, oobeRow{kind: oobeRowNote, label: "  (loading…)"})
-			} else if o.streamsErr != "" {
-				rows = append(rows, oobeRow{kind: oobeRowNote, label: "  error: " + o.streamsErr})
-			} else {
-				for _, s := range o.streams {
+			case o.streams.Err != nil:
+				rows = append(rows, oobeRow{kind: oobeRowNote, label: "  error: " + o.streams.Err.Error()})
+			default:
+				for _, s := range o.streams.Items {
 					rows = append(rows, oobeRow{kind: oobeRowStream, label: "  " + s, streamName: s})
 				}
-				if len(o.streams) == 0 {
+				if len(o.streams.Items) == 0 {
 					rows = append(rows, oobeRow{kind: oobeRowNote, label: "  (no streams)"})
 				}
 			}
 		case groupMetrics, groupTraces:
 			rows = append(rows, oobeRow{kind: oobeRowNote, label: "  (coming soon)"})
 		case groupDashboards:
-			if o.foldersLoading {
+			switch {
+			case o.folders.Loading:
 				rows = append(rows, oobeRow{kind: oobeRowNote, label: "  (loading…)"})
-			} else if o.foldersErr != "" {
-				rows = append(rows, oobeRow{kind: oobeRowNote, label: "  error: " + o.foldersErr})
-			} else {
-				for i, f := range o.folders {
+			case o.folders.Err != nil:
+				rows = append(rows, oobeRow{kind: oobeRowNote, label: "  error: " + o.folders.Err.Error()})
+			default:
+				for i := range o.folders.Items {
+					f := &o.folders.Items[i]
 					fa := "  ▸ "
-					if f.open {
+					if f.Open {
 						fa = "  ▾ "
 					}
 					flabel := f.name
@@ -360,15 +325,16 @@ func (o *oobeSchemaOverlay) rows() []oobeRow {
 						label:     fa + flabel,
 						folderIdx: i,
 					})
-					if !f.open {
+					if !f.Open {
 						continue
 					}
-					if f.loading {
+					switch {
+					case f.Loading:
 						rows = append(rows, oobeRow{kind: oobeRowNote, label: "    (loading…)"})
-					} else if f.err != "" {
-						rows = append(rows, oobeRow{kind: oobeRowNote, label: "    error: " + f.err})
-					} else {
-						for _, d := range f.dashboards {
+					case f.Err != nil:
+						rows = append(rows, oobeRow{kind: oobeRowNote, label: "    error: " + f.Err.Error()})
+					default:
+						for _, d := range f.Items {
 							dlabel := d.Title
 							if dlabel == "" {
 								dlabel = d.DashboardID
@@ -380,12 +346,12 @@ func (o *oobeSchemaOverlay) rows() []oobeRow {
 								dashboardInfo: d,
 							})
 						}
-						if len(f.dashboards) == 0 {
+						if len(f.Items) == 0 {
 							rows = append(rows, oobeRow{kind: oobeRowNote, label: "    (no dashboards)"})
 						}
 					}
 				}
-				if len(o.folders) == 0 {
+				if len(o.folders.Items) == 0 {
 					rows = append(rows, oobeRow{kind: oobeRowNote, label: "  (no folders)"})
 				}
 			}
@@ -398,9 +364,9 @@ func (o *oobeSchemaOverlay) rows() []oobeRow {
 
 func (o *oobeSchemaOverlay) View(width, height int, th *theme.Theme) string {
 	rows := o.rows()
-	o.viewLen = height - 4
-	if o.viewLen < 1 {
-		o.viewLen = 1
+	o.state.ViewLen = height - 4
+	if o.state.ViewLen < 1 {
+		o.state.ViewLen = 1
 	}
 	o.edgeFollow(rows)
 
@@ -411,18 +377,18 @@ func (o *oobeSchemaOverlay) View(width, height int, th *theme.Theme) string {
 
 	// Connection title.
 	connTitle := o.backend.Title()
-	lines = append(lines, th.Subtle.Render(oobePad("  "+connTitle, inner)))
+	lines = append(lines, th.Subtle.Render(ui.Pad("  "+connTitle, inner)))
 	lines = append(lines, th.Subtle.Render(strings.Repeat("─", inner)))
 
 	// Visible rows.
-	end := o.offset + o.viewLen
+	end := o.state.Offset + o.state.ViewLen
 	if end > len(rows) {
 		end = len(rows)
 	}
-	for i := o.offset; i < end; i++ {
+	for i := o.state.Offset; i < end; i++ {
 		r := rows[i]
-		line := oobePad(r.label, inner)
-		if i == o.cursor && r.selectable() {
+		line := ui.Pad(r.label, inner)
+		if i == o.state.Cursor && r.selectable() {
 			lines = append(lines, th.ListSelected.Render(line))
 		} else if r.kind == oobeRowGroup {
 			lines = append(lines, th.Header.Render(line))
@@ -435,7 +401,7 @@ func (o *oobeSchemaOverlay) View(width, height int, th *theme.Theme) string {
 
 	// Hint line.
 	lines = append(lines, th.Subtle.Render(strings.Repeat("─", inner)))
-	lines = append(lines, th.Subtle.Render(oobePad(" enter open  •  r refresh  •  esc back", inner)))
+	lines = append(lines, th.Subtle.Render(ui.Pad(" enter open  •  r refresh  •  esc back", inner)))
 
 	body := strings.Join(lines, "\n")
 	box := ui.Box("schema", body, bw, th)
@@ -446,50 +412,16 @@ func (o *oobeSchemaOverlay) Fullscreen() bool { return true }
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
+// edgeFollow clamps the cursor onto the row list and scrolls just enough to
+// keep it inside the visible window.
 func (o *oobeSchemaOverlay) edgeFollow(rows []oobeRow) {
-	if o.cursor < 0 {
-		o.cursor = 0
+	if o.state.Cursor < 0 {
+		o.state.Cursor = 0
 	}
-	if o.cursor >= len(rows) {
-		o.cursor = len(rows) - 1
+	if o.state.Cursor >= len(rows) {
+		o.state.Cursor = len(rows) - 1
 	}
-	if o.cursor < o.offset {
-		o.offset = o.cursor
-	}
-	if o.cursor >= o.offset+o.viewLen {
-		o.offset = o.cursor - o.viewLen + 1
-	}
-	if o.offset < 0 {
-		o.offset = 0
-	}
-}
-
-func oobeNextSelectable(rows []oobeRow, cur int) int {
-	for i := cur + 1; i < len(rows); i++ {
-		if rows[i].selectable() {
-			return i
-		}
-	}
-	return cur
-}
-
-func oobePrevSelectable(rows []oobeRow, cur int) int {
-	for i := cur - 1; i >= 0; i-- {
-		if rows[i].selectable() {
-			return i
-		}
-	}
-	return cur
-}
-
-func oobePad(s string, w int) string {
-	for len(s) < w {
-		s += " "
-	}
-	if len(s) > w {
-		s = s[:w]
-	}
-	return s
+	o.state.ScrollToCursor(len(rows), o.state.ViewLen)
 }
 
 // formatTimeRange is defined in oobedashboard.go (shared within popup package).

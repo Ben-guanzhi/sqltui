@@ -15,7 +15,7 @@ import (
 // async message
 
 type panelDataMsg struct {
-	owner    *panelViewerOverlay
+	ui.Owned[panelViewerOverlay]
 	panelIdx int
 	data     []map[string]any
 	err      error
@@ -65,7 +65,7 @@ func (v *panelViewerOverlay) Init() tea.Cmd {
 func (v *panelViewerOverlay) Update(msg tea.Msg) (ui.Overlay, tea.Cmd) {
 	switch m := msg.(type) {
 	case panelDataMsg:
-		if m.owner != v {
+		if m.Stale(v) {
 			return v, nil
 		}
 		v.dataLoading = false
@@ -117,7 +117,10 @@ func (v *panelViewerOverlay) loadPanelData(idx int) tea.Cmd {
 	}
 	return func() tea.Msg {
 		data, err := be.QueryPanel(queryCtx)
-		return panelDataMsg{owner: owner, panelIdx: idx, data: data, err: err}
+		return panelDataMsg{
+			Owned:    ui.Owned[panelViewerOverlay]{Owner: owner},
+			panelIdx: idx, data: data, err: err,
+		}
 	}
 }
 
@@ -225,15 +228,15 @@ func (v *panelViewerOverlay) View(w, h int, th *theme.Theme) string {
 	// Build sidebar lines (bodyH total)
 	sidebarLines := make([]string, 0, bodyH)
 	// Row 0: "Panels" title
-	sidebarLines = append(sidebarLines, th.Header.Render(sidebarPad("Panels", sidebarW)))
+	sidebarLines = append(sidebarLines, th.Header.Render(ui.Pad("Panels", sidebarW)))
 	// Rows 1..bodyH-1: panel list items
 	for row := 0; row < listH; row++ {
 		idx := v.sidebarOff + row
 		if idx >= len(v.panels) {
-			sidebarLines = append(sidebarLines, sidebarPad("", sidebarW))
+			sidebarLines = append(sidebarLines, ui.Pad("", sidebarW))
 			continue
 		}
-		label := sidebarPad(v.panels[idx].Title, sidebarW)
+		label := ui.Pad(v.panels[idx].Title, sidebarW)
 		if idx == v.panelIdx {
 			sidebarLines = append(sidebarLines, th.ListSelected.Render(label))
 		} else {
@@ -274,7 +277,7 @@ func (v *panelViewerOverlay) View(w, h int, th *theme.Theme) string {
 		if i < len(sidebarLines) {
 			sl = sidebarLines[i]
 		} else {
-			sl = sidebarPad("", sidebarW)
+			sl = ui.Pad("", sidebarW)
 		}
 		if i < len(chartLines) {
 			cl = chartLines[i]
@@ -307,19 +310,6 @@ func padLineToWidth(s string, w int) string {
 		s = ansi.Truncate(s, w, "")
 	}
 	return s
-}
-
-// sidebarPad pads or truncates s to exactly w bytes (ASCII-safe for panel titles).
-func sidebarPad(s string, w int) string {
-	r := []rune(s)
-	if len(r) > w {
-		r = r[:w]
-	}
-	result := string(r)
-	for len([]rune(result)) < w {
-		result += " "
-	}
-	return result
 }
 
 func formatTimeRange(minutes int) string {

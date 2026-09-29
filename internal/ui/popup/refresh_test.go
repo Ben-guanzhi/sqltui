@@ -97,20 +97,20 @@ func TestRefreshFactoryAndDispatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("factory: %v", err)
 	}
-	ro := ov.(*refreshTableOverlay)
-	if ro.ns != "" || ro.table != "users" {
-		t.Fatalf("overlay state = ns=%q table=%q, want ns=\"\" table=\"users\"", ro.ns, ro.table)
+	ro := ov.(*ui.TableLoader)
+	if ro.NS != "" || ro.Table != "users" {
+		t.Fatalf("overlay state = ns=%q table=%q, want ns=\"\" table=\"users\"", ro.NS, ro.Table)
 	}
 
 	// Init kicks off the async fetch with the pane's namespace/table and the
 	// refresh limit (200).
-	loaded := runRefreshCmd(ro.Init()).(refreshTableMsg)
-	if loaded.err != nil || loaded.frame != frame {
+	loaded := runRefreshCmd(ro.Init()).(ui.TableLoadedMsg)
+	if loaded.Err != nil || loaded.Frame != frame {
 		t.Fatalf("unexpected load result: %+v", loaded)
 	}
-	if !be.called || be.fetchNS != "" || be.fetchTbl != "users" || be.fetchLim != refreshLimit {
+	if !be.called || be.fetchNS != "" || be.fetchTbl != "users" || be.fetchLim != ui.TableFetchLimit {
 		t.Fatalf("FetchTable(%q, %q, %d) called=%v, want (\"\", \"users\", %d)",
-			be.fetchNS, be.fetchTbl, be.fetchLim, be.called, refreshLimit)
+			be.fetchNS, be.fetchTbl, be.fetchLim, be.called, ui.TableFetchLimit)
 	}
 
 	// The success result closes the overlay, emits a ReplaceBaseMsg carrying
@@ -151,9 +151,9 @@ func TestRefreshFetchErrorSurfaces(t *testing.T) {
 	if err != nil {
 		t.Fatalf("factory: %v", err)
 	}
-	ro := ov.(*refreshTableOverlay)
-	loaded := runRefreshCmd(ro.Init()).(refreshTableMsg)
-	if loaded.err == nil {
+	ro := ov.(*ui.TableLoader)
+	loaded := runRefreshCmd(ro.Init()).(ui.TableLoadedMsg)
+	if loaded.Err == nil {
 		t.Fatal("expected fetch error")
 	}
 	_, cmd := ro.Update(loaded)

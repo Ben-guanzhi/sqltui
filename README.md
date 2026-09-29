@@ -79,6 +79,7 @@ SQLite databases are just files — open them directly in file mode
 | SQL Server | `sqltui sqlserver` | [microsoft/go-mssqldb](https://github.com/microsoft/go-mssqldb) |
 | Oracle     | `sqltui oracle`   | [sijms/go-ora](https://github.com/sijms/go-ora)             |
 | Redis      | `sqltui redis`    | [redis/go-redis](https://github.com/redis/go-redis)         |
+| OpenObserve| `sqltui openobserve` (`oo`) | built-in HTTP/SSE client (streams, dashboards)       |
 
 A connection form opens first (prefilled from the config file): `enter`
 connects, `tab`/arrows move between fields, `ctrl+s` saves, `esc` quits.

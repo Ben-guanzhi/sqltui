@@ -1,6 +1,7 @@
 package config
 
 import (
+	"runtime"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -45,8 +46,11 @@ func TestUIConfigRoundtrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if perm := info.Mode().Perm(); perm != 0600 {
-		t.Fatalf("config file perm = %o, want 600", perm)
+	// POSIX perms don't exist on Windows (0600 files report 0666).
+	if runtime.GOOS != "windows" {
+		if perm := info.Mode().Perm(); perm != 0600 {
+			t.Fatalf("config file perm = %o, want 600", perm)
+		}
 	}
 }
 
@@ -178,8 +182,11 @@ func TestMigrateLegacyJSONOnRead(t *testing.T) {
 	if err != nil {
 		t.Fatalf("config.yaml not created by migration: %v", err)
 	}
-	if perm := info.Mode().Perm(); perm != 0600 {
-		t.Fatalf("migrated config perm = %o, want 600", perm)
+	// POSIX perms don't exist on Windows (0600 files report 0666).
+	if runtime.GOOS != "windows" {
+		if perm := info.Mode().Perm(); perm != 0600 {
+			t.Fatalf("migrated config perm = %o, want 600", perm)
+		}
 	}
 
 	// ...and the json file is untouched

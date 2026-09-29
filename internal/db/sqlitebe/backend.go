@@ -73,7 +73,7 @@ func (b *Backend) Tables(string) ([]string, error) {
 // FetchTable loads up to limit rows of a table; the namespace argument is
 // ignored.
 func (b *Backend) FetchTable(_ string, table string, limit int) (*data.Frame, error) {
-	query := fmt.Sprintf("select * from %s limit %d", quoteIdentifier(table), limit)
+	query := fmt.Sprintf("select * from %s limit %d", db.QuoteIdentDouble(table), limit)
 	fields, records, err := b.db.RawQuery(query)
 	if err != nil {
 		return nil, err

@@ -38,23 +38,17 @@ type Pane struct {
 	// SheetEditing is true while the sheet view is inline-editing the
 	// cursored field. The "e" key toggles it on; saveedit/canceledit clear it.
 	SheetEditing bool
-	// SheetEdit holds the runes typed during an inline sheet edit.
-	SheetEdit []rune
-	// SheetEditCur is the rune cursor within SheetEdit.
-	SheetEditCur int
+	// SheetEdit holds the text being typed during an inline sheet edit.
+	SheetEdit LineInput
 	// SheetFilter holds the current field-filter pattern typed after "/".
 	// SheetField is always interpreted as an index INTO the matched set
 	// (sheetMatchedCols), not a raw column index; with an empty filter the
 	// matched set is every column so the two coincide.
-	SheetFilter    []rune
+	SheetFilter    LineInput
 	SheetFiltering bool
 	// JsonViewOff is the scroll offset when viewing a row as JSON.
 	JsonViewOff int
 
-	// SortCol is the column name currently sorted on ("" = unsorted).
-	// SortAsc is true for ascending order, false for descending.
-	SortCol string
-	SortAsc bool
 	ColZoomed      bool  // true when user zoomed into a single column via z key
 	savedTableCols []int // TableCols saved before zoom, restored on exit
 	savedColCursor int   // colCursor saved before zoom, restored on exit
@@ -137,13 +131,10 @@ func (p *Pane) resetSheet() {
 	p.SheetField = 0
 	p.SheetValOff = 0
 	p.SheetEditing = false
-	p.SheetEdit = nil
-	p.SheetEditCur = 0
-	p.SheetFilter = nil
+	p.SheetEdit = LineInput{}
+	p.SheetFilter = LineInput{}
 	p.SheetFiltering = false
 	p.JsonViewOff = 0
-	p.SortCol = ""
-	p.SortAsc = false
 	p.ColZoomed = false
 }
 

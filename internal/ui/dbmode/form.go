@@ -31,12 +31,14 @@ const (
 	fkOrg      = "org"
 )
 
-// connField is one editable line of the connection form.
+// connField is one editable line of the connection form. The LineInput is
+// used append-only: the cursor never moves off the end, so Backspace/Clear/
+// InsertKey behave as "delete last rune / wipe / append".
 type connField struct {
 	key    string
 	label  string
 	masked bool
-	value  []rune
+	input  ui.LineInput
 }
 
 // connDoneMsg reports the outcome of an asynchronous connection attempt.
@@ -69,94 +71,220 @@ func newConnForm(ctx ui.AppContext, kind string) *connForm {
 // per-engine config (best effort: a missing/corrupt config yields empty
 // prefills, the readers themselves provide sensible defaults).
 func loadFields(kind string) []connField {
-	f := func(key, label, val string, masked bool) connField {
-		return connField{key: key, label: label, masked: masked, value: []rune(val)}
+	spec, ok := engineSpecs[kind]
+	if !ok {
+		return nil
 	}
-	switch kind {
-	case KindMysql:
-		c, err := config.ReadMySqlConfig()
-		if err != nil {
-			c = &config.MysqlConfig{}
-		}
-		return []connField{
-			f(fkUser, "user", c.UserName, false),
-			f(fkPassword, "password", c.Password, true),
-			f(fkHost, "host", c.Host, false),
-			f(fkPort, "port", c.Port, false),
-			f(fkDatabase, "database", c.DbName, false),
-		}
-	case KindPostgres:
-		c, err := config.ReadPostgresConfig()
-		if err != nil {
-			c = &config.PostgresConfig{}
-		}
-		return []connField{
-			f(fkUser, "user", c.UserName, false),
-			f(fkPassword, "password", c.Password, true),
-			f(fkHost, "host", c.Host, false),
-			f(fkPort, "port", c.Port, false),
-			f(fkDatabase, "database", c.DbName, false),
-			f(fkSslMode, "sslmode", c.SslMode, false),
-		}
-	case KindRedis:
-		c, err := config.ReadRedisConfig()
-		if err != nil {
-			c = &config.RedisConfig{}
-		}
-		return []connField{
-			f(fkUser, "user", c.UserName, false),
-			f(fkPassword, "password", c.Password, true),
-			f(fkHost, "host", c.Host, false),
-			f(fkPort, "port", c.Port, false),
-			f(fkDbNum, "db number", c.RdbNum, false),
-		}
-	case KindOpenObserve:
-		c := config.ReadOpenObserveConfig()
-		host := c.Host
-		if host == "" {
-			host = "localhost"
-		}
-		port := c.Port
-		if port == "" {
-			port = "5080"
-		}
-		org := c.Org
-		if org == "" {
-			org = "default"
-		}
-		return []connField{
-			f(fkUser, "user", c.UserName, false),
-			f(fkPassword, "password", c.Password, true),
-			f(fkHost, "host", host, false),
-			f(fkPort, "port", port, false),
-			f(fkOrg, "org", org, false),
-		}
-	case KindSqlServer:
-		c, err := config.ReadSqlServerConfig()
-		if err != nil {
-			c = &config.SqlServerConfig{}
-		}
-		return []connField{
-			f(fkUser, "user", c.UserName, false),
-			f(fkPassword, "password", c.Password, true),
-			f(fkHost, "host", c.Host, false),
-			f(fkPort, "port", c.Port, false),
-			f(fkDatabase, "database", c.DbName, false),
-		}
-	case KindOracle:
-		c, err := config.ReadOracleConfig()
-		if err != nil {
-			c = &config.OracleConfig{}
-		}
-		return []connField{
-			f(fkUser, "user", c.UserName, false),
-			f(fkPassword, "password", c.Password, true),
-			f(fkHost, "host", c.Host, false),
-			f(fkPort, "port", c.Port, false),
-			f(fkDatabase, "service name", c.DbName, false),
-		}
+	vals := spec.prefill()
+	fields := make([]connField, len(spec.fields))
+	for i, s := range spec.fields {
+		fields[i] = connField{key: s.key, label: s.label, masked: s.masked, input: ui.NewLineInput(vals[i])}
 	}
-	return nil
+	return fields
+}
+
+// fieldSpec is one row of the engineSpecs table: the form field key, display
+// label and whether the input is masked.
+type fieldSpec struct {
+	key    string
+	label  string
+	masked bool
+}
+
+// baseFields is the common field head, in display order.
+var baseFields = []fieldSpec{
+	{key: fkUser, label: "user"},
+	{key: fkPassword, label: "password", masked: true},
+	{key: fkHost, label: "host"},
+	{key: fkPort, label: "port"},
+}
+
+// engineSpec declares, for one engine kind, the connection form fields in
+// display order, the prefill source, the dialer and the config writer.
+// engineSpecs is the single source of truth behind loadFields, dial and
+// saveConfig.
+type engineSpec struct {
+	fields  []fieldSpec
+	prefill func() []string
+	dial    func(v map[string]string) (db.Backend, db.KVBackend, error)
+	save    func(v map[string]string) error
+}
+
+func fieldsFor(tail ...fieldSpec) []fieldSpec {
+	all := make([]fieldSpec, 0, len(baseFields)+len(tail))
+	all = append(all, baseFields...)
+	return append(all, tail...)
+}
+
+var engineSpecs = map[string]engineSpec{
+	KindMysql: {
+		fields: fieldsFor(fieldSpec{key: fkDatabase, label: "database"}),
+		prefill: func() []string {
+			c, err := config.ReadMySqlConfig()
+			if err != nil {
+				c = &config.MysqlConfig{}
+			}
+			return []string{c.UserName, c.Password, c.Host, c.Port, c.DbName}
+		},
+		dial: func(v map[string]string) (db.Backend, db.KVBackend, error) {
+			be, err := mysqlbe.Connect(mysqlbe.Config{
+				UserName: v[fkUser], Password: v[fkPassword],
+				Host: v[fkHost], Port: v[fkPort], DbName: v[fkDatabase],
+			})
+			if err != nil {
+				return nil, nil, err
+			}
+			return be, nil, nil
+		},
+		save: func(v map[string]string) error {
+			return config.WriteMysqlConfig(&config.MysqlConfig{
+				UserName: v[fkUser], Password: v[fkPassword],
+				Host: v[fkHost], Port: v[fkPort], DbName: v[fkDatabase],
+			})
+		},
+	},
+	KindPostgres: {
+		fields: fieldsFor(
+			fieldSpec{key: fkDatabase, label: "database"},
+			fieldSpec{key: fkSslMode, label: "sslmode"},
+		),
+		prefill: func() []string {
+			c, err := config.ReadPostgresConfig()
+			if err != nil {
+				c = &config.PostgresConfig{}
+			}
+			return []string{c.UserName, c.Password, c.Host, c.Port, c.DbName, c.SslMode}
+		},
+		dial: func(v map[string]string) (db.Backend, db.KVBackend, error) {
+			be, err := postgresbe.Connect(postgresbe.Config{
+				UserName: v[fkUser], Password: v[fkPassword],
+				Host: v[fkHost], Port: v[fkPort], DbName: v[fkDatabase],
+				SslMode: v[fkSslMode],
+			})
+			if err != nil {
+				return nil, nil, err
+			}
+			return be, nil, nil
+		},
+		save: func(v map[string]string) error {
+			return config.WritePostgresConfig(&config.PostgresConfig{
+				UserName: v[fkUser], Password: v[fkPassword],
+				Host: v[fkHost], Port: v[fkPort], DbName: v[fkDatabase],
+				SslMode: v[fkSslMode],
+			})
+		},
+	},
+	KindRedis: {
+		fields: fieldsFor(fieldSpec{key: fkDbNum, label: "db number"}),
+		prefill: func() []string {
+			c, err := config.ReadRedisConfig()
+			if err != nil {
+				c = &config.RedisConfig{}
+			}
+			return []string{c.UserName, c.Password, c.Host, c.Port, c.RdbNum}
+		},
+		dial: func(v map[string]string) (db.Backend, db.KVBackend, error) {
+			kv, err := redisbe.Connect(redisbe.Config{
+				UserName: v[fkUser], Password: v[fkPassword],
+				Host: v[fkHost], Port: v[fkPort], RdbNum: v[fkDbNum],
+			})
+			if err != nil {
+				return nil, nil, err
+			}
+			return nil, kv, nil
+		},
+		save: func(v map[string]string) error {
+			return config.WriteRedisConfig(&config.RedisConfig{
+				UserName: v[fkUser], Password: v[fkPassword],
+				Host: v[fkHost], Port: v[fkPort], RdbNum: v[fkDbNum],
+			})
+		},
+	},
+	KindOpenObserve: {
+		fields: fieldsFor(fieldSpec{key: fkOrg, label: "org"}),
+		prefill: func() []string {
+			c := config.ReadOpenObserveConfig()
+			host, port, org := c.Host, c.Port, c.Org
+			if host == "" {
+				host = "localhost"
+			}
+			if port == "" {
+				port = "5080"
+			}
+			if org == "" {
+				org = "default"
+			}
+			return []string{c.UserName, c.Password, host, port, org}
+		},
+		dial: func(v map[string]string) (db.Backend, db.KVBackend, error) {
+			be, err := oobe.Connect(oobe.Config{
+				UserName: v[fkUser], Password: v[fkPassword],
+				Host: v[fkHost], Port: v[fkPort], Org: v[fkOrg],
+			})
+			if err != nil {
+				return nil, nil, err
+			}
+			return be, nil, nil
+		},
+		save: func(v map[string]string) error {
+			return config.WriteOpenObserveConfig(config.OpenObserveConfig{
+				UserName: v[fkUser], Password: v[fkPassword],
+				Host: v[fkHost], Port: v[fkPort], Org: v[fkOrg],
+			})
+		},
+	},
+	KindSqlServer: {
+		fields: fieldsFor(fieldSpec{key: fkDatabase, label: "database"}),
+		prefill: func() []string {
+			c, err := config.ReadSqlServerConfig()
+			if err != nil {
+				c = &config.SqlServerConfig{}
+			}
+			return []string{c.UserName, c.Password, c.Host, c.Port, c.DbName}
+		},
+		dial: func(v map[string]string) (db.Backend, db.KVBackend, error) {
+			be, err := sqlserverbe.Connect(sqlserverbe.Config{
+				UserName: v[fkUser], Password: v[fkPassword],
+				Host: v[fkHost], Port: v[fkPort], DbName: v[fkDatabase],
+			})
+			if err != nil {
+				return nil, nil, err
+			}
+			return be, nil, nil
+		},
+		save: func(v map[string]string) error {
+			return config.WriteSqlServerConfig(&config.SqlServerConfig{
+				UserName: v[fkUser], Password: v[fkPassword],
+				Host: v[fkHost], Port: v[fkPort], DbName: v[fkDatabase],
+			})
+		},
+	},
+	KindOracle: {
+		fields: fieldsFor(fieldSpec{key: fkDatabase, label: "service name"}),
+		prefill: func() []string {
+			c, err := config.ReadOracleConfig()
+			if err != nil {
+				c = &config.OracleConfig{}
+			}
+			return []string{c.UserName, c.Password, c.Host, c.Port, c.DbName}
+		},
+		dial: func(v map[string]string) (db.Backend, db.KVBackend, error) {
+			be, err := oraclebe.Connect(oraclebe.Config{
+				UserName: v[fkUser], Password: v[fkPassword],
+				Host: v[fkHost], Port: v[fkPort], DbName: v[fkDatabase],
+			})
+			if err != nil {
+				return nil, nil, err
+			}
+			return be, nil, nil
+		},
+		save: func(v map[string]string) error {
+			return config.WriteOracleConfig(&config.OracleConfig{
+				UserName: v[fkUser], Password: v[fkPassword],
+				Host: v[fkHost], Port: v[fkPort], DbName: v[fkDatabase],
+			})
+		},
+	},
 }
 
 // values snapshots the current field contents keyed by field key. Masked
@@ -165,7 +293,7 @@ func loadFields(kind string) []connField {
 func (o *connForm) values() map[string]string {
 	m := make(map[string]string, len(o.fields))
 	for _, fl := range o.fields {
-		s := string(fl.value)
+		s := fl.input.String()
 		if !fl.masked {
 			s = strings.TrimSpace(s)
 		}
@@ -182,100 +310,16 @@ var dialer = dial
 // dial opens the connection for one kind. Exactly one of the returned
 // backends is non-nil on success; the connection is tracked for shutdown.
 func dial(kind string, v map[string]string) (db.Backend, db.KVBackend, error) {
-	switch kind {
-	case KindMysql:
-		be, err := mysqlbe.Connect(mysqlbe.Config{
-			UserName: v[fkUser], Password: v[fkPassword],
-			Host: v[fkHost], Port: v[fkPort], DbName: v[fkDatabase],
-		})
-		if err != nil {
-			return nil, nil, err
-		}
-		return be, nil, nil
-	case KindPostgres:
-		be, err := postgresbe.Connect(postgresbe.Config{
-			UserName: v[fkUser], Password: v[fkPassword],
-			Host: v[fkHost], Port: v[fkPort], DbName: v[fkDatabase],
-			SslMode: v[fkSslMode],
-		})
-		if err != nil {
-			return nil, nil, err
-		}
-		return be, nil, nil
-	case KindRedis:
-		kv, err := redisbe.Connect(redisbe.Config{
-			UserName: v[fkUser], Password: v[fkPassword],
-			Host: v[fkHost], Port: v[fkPort], RdbNum: v[fkDbNum],
-		})
-		if err != nil {
-			return nil, nil, err
-		}
-		return nil, kv, nil
-	case KindOpenObserve:
-		be, err := oobe.Connect(oobe.Config{
-			UserName: v[fkUser], Password: v[fkPassword],
-			Host: v[fkHost], Port: v[fkPort], Org: v[fkOrg],
-		})
-		if err != nil {
-			return nil, nil, err
-		}
-		return be, nil, nil
-	case KindSqlServer:
-		be, err := sqlserverbe.Connect(sqlserverbe.Config{
-			UserName: v[fkUser], Password: v[fkPassword],
-			Host: v[fkHost], Port: v[fkPort], DbName: v[fkDatabase],
-		})
-		if err != nil {
-			return nil, nil, err
-		}
-		return be, nil, nil
-	case KindOracle:
-		be, err := oraclebe.Connect(oraclebe.Config{
-			UserName: v[fkUser], Password: v[fkPassword],
-			Host: v[fkHost], Port: v[fkPort], DbName: v[fkDatabase],
-		})
-		if err != nil {
-			return nil, nil, err
-		}
-		return be, nil, nil
+	if spec, ok := engineSpecs[kind]; ok {
+		return spec.dial(v)
 	}
 	return nil, nil, fmt.Errorf("unknown database kind: %s", kind)
 }
 
 // saveConfig persists the form values with the existing per-engine writers.
 func saveConfig(kind string, v map[string]string) error {
-	switch kind {
-	case KindMysql:
-		return config.WriteMysqlConfig(&config.MysqlConfig{
-			UserName: v[fkUser], Password: v[fkPassword],
-			Host: v[fkHost], Port: v[fkPort], DbName: v[fkDatabase],
-		})
-	case KindPostgres:
-		return config.WritePostgresConfig(&config.PostgresConfig{
-			UserName: v[fkUser], Password: v[fkPassword],
-			Host: v[fkHost], Port: v[fkPort], DbName: v[fkDatabase],
-			SslMode: v[fkSslMode],
-		})
-	case KindRedis:
-		return config.WriteRedisConfig(&config.RedisConfig{
-			UserName: v[fkUser], Password: v[fkPassword],
-			Host: v[fkHost], Port: v[fkPort], RdbNum: v[fkDbNum],
-		})
-	case KindOpenObserve:
-		return config.WriteOpenObserveConfig(config.OpenObserveConfig{
-			UserName: v[fkUser], Password: v[fkPassword],
-			Host: v[fkHost], Port: v[fkPort], Org: v[fkOrg],
-		})
-	case KindSqlServer:
-		return config.WriteSqlServerConfig(&config.SqlServerConfig{
-			UserName: v[fkUser], Password: v[fkPassword],
-			Host: v[fkHost], Port: v[fkPort], DbName: v[fkDatabase],
-		})
-	case KindOracle:
-		return config.WriteOracleConfig(&config.OracleConfig{
-			UserName: v[fkUser], Password: v[fkPassword],
-			Host: v[fkHost], Port: v[fkPort], DbName: v[fkDatabase],
-		})
+	if spec, ok := engineSpecs[kind]; ok {
+		return spec.save(v)
 	}
 	return fmt.Errorf("unknown database kind: %s", kind)
 }
@@ -356,12 +400,7 @@ func (o *connForm) insertText(s string) {
 	if len(o.fields) == 0 {
 		return
 	}
-	fl := &o.fields[o.focus]
-	for _, r := range s {
-		if r >= ' ' && r != 0x7f {
-			fl.value = append(fl.value, r)
-		}
-	}
+	o.fields[o.focus].input.InsertKey(s)
 }
 
 func (o *connForm) handleKey(key tea.KeyPressMsg) (ui.Overlay, tea.Cmd) {
@@ -394,13 +433,10 @@ func (o *connForm) handleKey(key tea.KeyPressMsg) (ui.Overlay, tea.Cmd) {
 		}
 		return o, func() tea.Msg { return ui.ToastMsg{Text: "config saved"} }
 	case "backspace":
-		fl := &o.fields[o.focus]
-		if n := len(fl.value); n > 0 {
-			fl.value = fl.value[:n-1]
-		}
+		o.fields[o.focus].input.Backspace()
 		return o, nil
 	case "ctrl+u":
-		o.fields[o.focus].value = nil
+		o.fields[o.focus].input.Clear()
 		return o, nil
 	}
 	if t := key.Text; t != "" {
@@ -428,9 +464,9 @@ func (o *connForm) View(width, height int, th *theme.Theme) string {
 
 	var lines []string
 	for i, fl := range o.fields {
-		val := string(fl.value)
+		val := fl.input.String()
 		if fl.masked {
-			val = strings.Repeat("*", len(fl.value))
+			val = strings.Repeat("*", fl.input.Len())
 		}
 		label := fmt.Sprintf(" %-*s ", labelW, fl.label)
 		room := inner - ansi.StringWidth(label) - 1

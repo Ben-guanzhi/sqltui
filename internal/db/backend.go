@@ -74,3 +74,39 @@ type KVBackend interface {
 	Value(key string) (string, error)
 	Close() error
 }
+
+// Optional capabilities a backend may implement beyond Backend. The UI probes
+// them with type assertions and degrades gracefully when a backend lacks one.
+
+// Namespaced reports the namespace (database, schema, or org) the connection
+// is currently operating against.
+type Namespaced interface {
+	CurrentNamespace() string
+}
+
+// TimeRanger reports and adjusts the time window of log queries.
+type TimeRanger interface {
+	GetTimeRange() int
+	SetTimeRange(minutes int)
+}
+
+// Paged reports and navigates paginated results.
+type Paged interface {
+	GetPage() int
+	SetPage(page int)
+	GetPageSize() int
+	SetPageSize(pageSize int)
+}
+
+// QueryParamsSetter bundles TimeRanger and Paged: the capabilities needed to
+// drive the unified query-params popup.
+type QueryParamsSetter interface {
+	TimeRanger
+	Paged
+}
+
+// TimeWindowResetter resets the sliding query time window, e.g. after the
+// time range or page of a paginated log query changes.
+type TimeWindowResetter interface {
+	ResetTimeWindow()
+}

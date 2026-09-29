@@ -5,6 +5,7 @@ import (
 
 	"github.com/LinPr/sqltui/internal/data"
 	"github.com/LinPr/sqltui/internal/db"
+	"github.com/go-sql-driver/mysql"
 )
 
 // Config holds the connection parameters for a MySQL server.
@@ -16,11 +17,19 @@ type Config struct {
 	DbName   string
 }
 
-// Dsn renders the config as a driver connection string:
-// user:pass@tcp(host:port)/db?charset=utf8&parseTime=true
+// Dsn renders the config as a driver connection string via the driver's own
+// formatter, so passwords/usernames containing @ : / ( ) and db names with ?
+// are escaped correctly instead of corrupting the DSN (the same treatment the
+// sqlserver/oracle backends give their URLs with QueryEscape).
 func (c Config) Dsn() string {
-	return fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?charset=utf8&parseTime=true",
-		c.UserName, c.Password, c.Host, c.Port, c.DbName)
+	cfg := mysql.NewConfig()
+	cfg.User = c.UserName
+	cfg.Passwd = c.Password
+	cfg.Net = "tcp"
+	cfg.Addr = c.Host + ":" + c.Port
+	cfg.DBName = c.DbName
+	cfg.Params = map[string]string{"charset": "utf8", "parseTime": "true"}
+	return cfg.FormatDSN()
 }
 
 // Backend adapts the mysql data-access layer to the db.Backend contract.
@@ -93,9 +102,9 @@ func (b *Backend) Tables(namespace string) ([]string, error) {
 
 // FetchTable loads up to limit rows of namespace.table.
 func (b *Backend) FetchTable(namespace, table string, limit int) (*data.Frame, error) {
-	ident := quoteIdent(table)
+	ident := db.QuoteIdentBacktick(table)
 	if namespace != "" {
-		ident = quoteIdent(namespace) + "." + ident
+		ident = db.QuoteIdentBacktick(namespace) + "." + ident
 	}
 	query := fmt.Sprintf("select * from %s limit %d", ident, limit)
 	fields, records, err := b.db.RawQuery(query)

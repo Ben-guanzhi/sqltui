@@ -7,6 +7,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/LinPr/sqltui/internal/db"
 	"github.com/LinPr/sqltui/internal/theme"
 	"github.com/LinPr/sqltui/internal/ui"
 )
@@ -14,13 +15,8 @@ import (
 func init() {
 	f := func(ctx ui.AppContext, arg string) (ui.Overlay, error) {
 		p := newQueryParams()
-		type oobeGetter interface {
-			GetTimeRange() int
-			GetPage() int
-			GetPageSize() int
-		}
 		if b := ctx.Backend(); b != nil {
-			if oo, ok := b.(oobeGetter); ok {
+			if oo, ok := b.(db.QueryParamsSetter); ok {
 				p.initFromBackend(oo.GetTimeRange(), oo.GetPage(), oo.GetPageSize())
 			}
 		}
@@ -55,10 +51,8 @@ const (
 type queryParams struct {
 	focus         int
 	trSel         int
-	pageInput     []rune
-	pageInputCur  int
-	pageSizeInput []rune
-	pageSizeCur   int
+	pageInput     ui.LineInput
+	pageSizeInput ui.LineInput
 	timeOnly      bool
 	onConfirm     func(minutes int) tea.Cmd
 }
@@ -81,10 +75,8 @@ func newTimeOnlySelector(currentMinutes int, onConfirm func(int) tea.Cmd) *query
 func newQueryParams() *queryParams {
 	return &queryParams{
 		trSel:         2,
-		pageInput:     []rune("1"),
-		pageInputCur:  1,
-		pageSizeInput: []rune("200"),
-		pageSizeCur:   3,
+		pageInput:     ui.NewLineInput("1"),
+		pageSizeInput: ui.NewLineInput("200"),
 	}
 }
 
@@ -95,12 +87,8 @@ func (q *queryParams) initFromBackend(minutes, page, pageSize int) {
 			break
 		}
 	}
-	ps := strconv.Itoa(page + 1)
-	q.pageInput = []rune(ps)
-	q.pageInputCur = len(q.pageInput)
-	pss := strconv.Itoa(pageSize)
-	q.pageSizeInput = []rune(pss)
-	q.pageSizeCur = len(q.pageSizeInput)
+	q.pageInput.Set(strconv.Itoa(page + 1))
+	q.pageSizeInput.Set(strconv.Itoa(pageSize))
 }
 
 func (q *queryParams) Update(msg tea.Msg) (ui.Overlay, tea.Cmd) {
@@ -126,63 +114,53 @@ func (q *queryParams) Update(msg tea.Msg) (ui.Overlay, tea.Cmd) {
 		case "up", "k":
 			if q.trSel > 0 {
 				q.trSel--
-				q.pageInput = []rune("1")
-				q.pageInputCur = 1
+				q.pageInput.Set("1")
 			}
 		case "down", "j":
 			if q.trSel < len(trOptions)-1 {
 				q.trSel++
-				q.pageInput = []rune("1")
-				q.pageInputCur = 1
+				q.pageInput.Set("1")
 			}
 		}
 	case secPage:
 		if !q.timeOnly {
-			qEditRune(key, &q.pageInput, &q.pageInputCur)
+			qEditRune(key, &q.pageInput)
 		}
 	case secPageSize:
 		if !q.timeOnly {
-			qEditRune(key, &q.pageSizeInput, &q.pageSizeCur)
+			qEditRune(key, &q.pageSizeInput)
 		}
 	}
 	return q, nil
 }
 
-func qEditRune(key tea.KeyPressMsg, buf *[]rune, cur *int) {
-	k := key.String()
-	switch k {
+// qEditRune routes one key press into a numeric line input: the shared
+// editing machine plus a digits-only insert policy.
+func qEditRune(key tea.KeyPressMsg, in *ui.LineInput) {
+	switch key.String() {
 	case "backspace", "ctrl+h":
-		if *cur > 0 {
-			*buf = append((*buf)[:*cur-1], (*buf)[*cur:]...)
-			*cur--
-		}
+		in.Backspace()
 	case "delete":
-		if *cur < len(*buf) {
-			*buf = append((*buf)[:*cur], (*buf)[*cur+1:]...)
-		}
+		in.Delete()
 	case "left":
-		if *cur > 0 {
-			*cur--
-		}
+		in.Left()
 	case "right":
-		if *cur < len(*buf) {
-			*cur++
-		}
+		in.Right()
 	case "home", "ctrl+a":
-		*cur = 0
+		in.Home()
 	case "end", "ctrl+e":
-		*cur = len(*buf)
+		in.End()
 	case "ctrl+u":
-		*buf = nil
-		*cur = 0
+		in.Clear()
 	default:
 		if t := key.Key().Text; t != "" && key.Mod == 0 {
-			for _, ch := range []rune(t) {
+			var digits []rune
+			for _, ch := range t {
 				if ch >= '0' && ch <= '9' {
-					*buf = append((*buf)[:*cur], append([]rune{ch}, (*buf)[*cur:]...)...)
-					*cur++
+					digits = append(digits, ch)
 				}
 			}
+			in.Insert(string(digits))
 		}
 	}
 }
@@ -193,11 +171,11 @@ func (q *queryParams) submit() tea.Cmd {
 		return tea.Sequence(ui.CloseOverlay, q.onConfirm(minutes))
 	}
 	page := 0
-	if v, err := strconv.Atoi(string(q.pageInput)); err == nil && v >= 1 {
+	if v, err := strconv.Atoi(q.pageInput.String()); err == nil && v >= 1 {
 		page = v - 1
 	}
 	pageSize := 200
-	if v, err := strconv.Atoi(string(q.pageSizeInput)); err == nil && v >= 1 {
+	if v, err := strconv.Atoi(q.pageSizeInput.String()); err == nil && v >= 1 {
 		pageSize = v
 	}
 	return tea.Sequence(
@@ -216,12 +194,12 @@ func (q *queryParams) View(width, height int, th *theme.Theme) string {
 
 	// time range section
 	if q.focus == secTimeRange {
-		lines = append(lines, th.ListSelected.Render(qpPad("▸ Time Range", inner)))
+		lines = append(lines, th.ListSelected.Render(ui.Pad("▸ Time Range", inner)))
 	} else {
-		lines = append(lines, th.Subtle.Render(qpPad("  Time Range", inner)))
+		lines = append(lines, th.Subtle.Render(ui.Pad("  Time Range", inner)))
 	}
 	for i, o := range trOptions {
-		label := qpPad("   "+o.label, inner)
+		label := ui.Pad("   "+o.label, inner)
 		if i == q.trSel {
 			lines = append(lines, th.Subtle.Render("  ●"+label[3:]))
 		} else {
@@ -234,25 +212,25 @@ func (q *queryParams) View(width, height int, th *theme.Theme) string {
 
 		// page section
 		if q.focus == secPage {
-			lines = append(lines, th.ListSelected.Render(qpPad("▸ Page", inner)))
+			lines = append(lines, th.ListSelected.Render(ui.Pad("▸ Page", inner)))
 		} else {
-			lines = append(lines, th.Subtle.Render(qpPad("  Page", inner)))
+			lines = append(lines, th.Subtle.Render(ui.Pad("  Page", inner)))
 		}
-		lines = append(lines, "  "+qpRenderInput(q.pageInput, q.pageInputCur, q.focus == secPage, inner-2, th))
+		lines = append(lines, "  "+qpRenderInput(&q.pageInput, q.focus == secPage, inner-2, th))
 
 		lines = append(lines, th.Subtle.Render(strings.Repeat("─", inner)))
 
 		// page size section
 		if q.focus == secPageSize {
-			lines = append(lines, th.ListSelected.Render(qpPad("▸ Page Size", inner)))
+			lines = append(lines, th.ListSelected.Render(ui.Pad("▸ Page Size", inner)))
 		} else {
-			lines = append(lines, th.Subtle.Render(qpPad("  Page Size", inner)))
+			lines = append(lines, th.Subtle.Render(ui.Pad("  Page Size", inner)))
 		}
-		lines = append(lines, "  "+qpRenderInput(q.pageSizeInput, q.pageSizeCur, q.focus == secPageSize, inner-2, th))
+		lines = append(lines, "  "+qpRenderInput(&q.pageSizeInput, q.focus == secPageSize, inner-2, th))
 	}
 
 	lines = append(lines, th.Subtle.Render(strings.Repeat("─", inner)))
-	lines = append(lines, th.Subtle.Render(qpPad(" ↑/↓ select  enter ok  esc cancel", inner)))
+	lines = append(lines, th.Subtle.Render(ui.Pad(" ↑/↓ select  enter ok  esc cancel", inner)))
 
 	body := strings.Join(lines, "\n")
 	title := "query params"
@@ -262,23 +240,15 @@ func (q *queryParams) View(width, height int, th *theme.Theme) string {
 	return ui.Box(title, body, qpWidth, th)
 }
 
-func qpRenderInput(buf []rune, cur int, active bool, w int, th *theme.Theme) string {
-	s := string(buf)
+func qpRenderInput(in *ui.LineInput, active bool, w int, th *theme.Theme) string {
 	if active {
-		if cur <= len(buf) {
-			s = string(buf[:cur]) + "█" + string(buf[cur:])
+		r := []rune(in.String())
+		cur := in.Cursor()
+		if cur > len(r) {
+			cur = len(r)
 		}
-		return th.Subtle.Render(qpPad(s, w+1))
+		s := string(r[:cur]) + "█" + string(r[cur:])
+		return th.Subtle.Render(ui.Pad(s, w+1))
 	}
-	return th.Subtle.Render(qpPad("["+s+"]", w))
-}
-
-func qpPad(s string, w int) string {
-	for len(s) < w {
-		s += " "
-	}
-	if len(s) > w {
-		s = s[:w]
-	}
-	return s
+	return th.Subtle.Render(ui.Pad("["+in.String()+"]", w))
 }

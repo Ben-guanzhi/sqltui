@@ -2,11 +2,11 @@ package oobe
 
 import (
 	"bytes"
-	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 )
 
 type httpClient struct {
@@ -15,16 +15,25 @@ type httpClient struct {
 	hc   *http.Client
 }
 
+// newHTTPClient builds the HTTP client for an OpenObserve server. The host
+// field may carry an explicit scheme ("https://obs.example.com"); bare hosts
+// keep the historical plain-http default. TLS certificate verification is
+// always on: the previous unconditional InsecureSkipVerify was dead config
+// (the base URL was hardcoded to http) and would have silently exposed Basic
+// credentials to a MITM once https was used.
 func newHTTPClient(host, port, user, pass string) *httpClient {
-	b64 := basicAuth(user, pass)
+	scheme := "http"
+	switch lower := strings.ToLower(host); {
+	case strings.HasPrefix(lower, "https://"):
+		scheme = "https"
+		host = host[8:]
+	case strings.HasPrefix(lower, "http://"):
+		host = host[7:]
+	}
 	return &httpClient{
-		base: "http://" + host + ":" + port,
-		auth: "Basic " + b64,
-		hc: &http.Client{
-			Transport: &http.Transport{
-				TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-			},
-		},
+		base: scheme + "://" + host + ":" + port,
+		auth: "Basic " + basicAuth(user, pass),
+		hc:   &http.Client{},
 	}
 }
 

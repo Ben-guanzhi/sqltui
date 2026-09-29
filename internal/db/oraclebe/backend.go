@@ -98,7 +98,7 @@ func (b *Backend) Run(stmt string) (db.Result, error) {
 		case strings.HasPrefix(words[0], "("):
 			isDQL = true
 		default:
-			isDQL = hasReturningClause(words)
+			isDQL = db.HasReturningClause(words)
 		}
 	}
 
@@ -149,9 +149,9 @@ func (b *Backend) FetchTable(namespace, table string, limit int) (*data.Frame, e
 	} else if limit > 10000 {
 		limit = 10000
 	}
-	ident := quoteIdent(table)
+	ident := db.QuoteIdentDouble(table)
 	if namespace != "" {
-		ident = quoteIdent(namespace) + "." + ident
+		ident = db.QuoteIdentDouble(namespace) + "." + ident
 	}
 	query := fmt.Sprintf("SELECT * FROM %s WHERE ROWNUM <= %d", ident, limit)
 	return b.queryFrame(query)

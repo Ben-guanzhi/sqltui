@@ -62,11 +62,24 @@ func TestQuoteIdentDialect(t *testing.T) {
 }
 
 func TestSqlLiteral(t *testing.T) {
-	if got := sqlLiteral("it's"); got != `'it''s'` {
+	mysql := &cellEditBackend{kind: "mysql"}
+	pg := &cellEditBackend{kind: "postgres"}
+	if got := sqlLiteral(nil, "it's"); got != `'it''s'` {
 		t.Errorf("sqlLiteral = %q", got)
 	}
-	if got := sqlLiteral("plain"); got != `'plain'` {
+	if got := sqlLiteral(nil, "plain"); got != `'plain'` {
 		t.Errorf("sqlLiteral = %q", got)
+	}
+	// MySQL: a trailing backslash must not swallow the closing quote
+	// (regression: `'c:\'` terminated the literal early and corrupted the
+	// statement, worst case rewriting the WHERE clause of a DELETE).
+	if got := sqlLiteral(mysql, `c:\`); got != `'c:\\'` {
+		t.Errorf("mysql sqlLiteral = %q, want %q", got, `'c:\\'`)
+	}
+	// PostgreSQL standard conforming strings treat the backslash literally;
+	// doubling would store two backslashes instead of one.
+	if got := sqlLiteral(pg, `c:\`); got != `'c:\'` {
+		t.Errorf("pg sqlLiteral = %q, want %q", got, `'c:\'`)
 	}
 }
 

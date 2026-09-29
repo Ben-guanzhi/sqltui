@@ -10,7 +10,19 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-var dataPath = os.Getenv("HOME") + "/.config/sqltui"
+// homeDir resolves the user's home directory portably: os.UserHomeDir covers
+// Windows (USERPROFILE) and Unix ($HOME); the explicit HOME fallback keeps
+// unusual environments (containers, MSYS) working. Windows-native processes
+// have no HOME, so relying on it alone made dataPath start with "/" and the
+// init() MkdirAll crash the program before main() could run.
+func homeDir() string {
+	if h, err := os.UserHomeDir(); err == nil && h != "" {
+		return h
+	}
+	return os.Getenv("HOME")
+}
+
+var dataPath = filepath.Join(homeDir(), ".config", "sqltui")
 var LogFile = dataPath + "/sqltui.log"
 
 // ConfigFile is the canonical on-disk config location (YAML). Older versions
@@ -113,48 +125,179 @@ func init() {
 }
 
 func defaultSqlConfig() SqlConfig {
-	return SqlConfig{
-		Mysql: &MysqlConfig{
-			UserName: "root",
-			Password: "123456",
-			Host:     "127.0.0.1",
-			Port:     "3306",
-			DbName:   "test_db",
-		},
-		Redis: &RedisConfig{
-			UserName: "",
-			Password: "",
-			Host:     "127.0.0.1",
-			Port:     "6379",
-			RdbNum:   "0",
-		},
-		Sqlite: &SqliteConfig{
-			FilePath: filepath.Join(dataPath, "sqlite.default"),
-		},
-		Postgres: &PostgresConfig{
-			UserName: "postgres",
-			Password: "",
-			Host:     "127.0.0.1",
-			Port:     "5432",
-			DbName:   "postgres",
-			SslMode:  "disable",
-		},
-		SqlServer: &SqlServerConfig{
-			UserName: "sa",
-			Password: "",
-			Host:     "127.0.0.1",
-			Port:     "1433",
-			DbName:   "master",
-		},
-		Oracle: &OracleConfig{
-			UserName: "system",
-			Password: "",
-			Host:     "127.0.0.1",
-			Port:     "1521",
-			DbName:   "xe",
-		},
-		UI: DefaultUIConfig(),
+	var c SqlConfig
+	c.Mysql = &MysqlConfig{}
+	defaultMysql(c.Mysql)
+	c.Redis = &RedisConfig{}
+	defaultRedis(c.Redis)
+	c.Sqlite = &SqliteConfig{}
+	defaultSqlite(c.Sqlite)
+	c.Postgres = &PostgresConfig{}
+	defaultPostgres(c.Postgres)
+	c.SqlServer = &SqlServerConfig{}
+	defaultSqlServer(c.SqlServer)
+	c.Oracle = &OracleConfig{}
+	defaultOracle(c.Oracle)
+	c.UI = DefaultUIConfig()
+	return c
+}
+
+// defaultMysql fills a zero MysqlConfig with the standard starter values.
+func defaultMysql(c *MysqlConfig) {
+	c.UserName = "root"
+	c.Host = "127.0.0.1"
+	c.Port = "3306"
+	c.DbName = "test_db"
+}
+
+func defaultRedis(c *RedisConfig) {
+	c.Host = "127.0.0.1"
+	c.Port = "6379"
+	c.RdbNum = "0"
+}
+
+// defaultSqlite points at a fresh default sqlite file inside the data path.
+// Evaluated per call so tests that repoint dataPath see their own dir.
+func defaultSqlite(c *SqliteConfig) {
+	c.FilePath = filepath.Join(dataPath, "sqlite.default")
+}
+
+func defaultPostgres(c *PostgresConfig) {
+	c.UserName = "postgres"
+	c.Host = "127.0.0.1"
+	c.Port = "5432"
+	c.DbName = "postgres"
+	c.SslMode = "disable"
+}
+
+func defaultSqlServer(c *SqlServerConfig) {
+	c.UserName = "sa"
+	c.Host = "127.0.0.1"
+	c.Port = "1433"
+	c.DbName = "master"
+}
+
+func defaultOracle(c *OracleConfig) {
+	c.UserName = "system"
+	c.Host = "127.0.0.1"
+	c.Port = "1521"
+	c.DbName = "xe"
+}
+
+// defaultOobe returns a starter OpenObserve config.
+func defaultOobe() OpenObserveConfig {
+	return OpenObserveConfig{Host: "localhost", Port: "5080", Org: "default"}
+}
+
+// ReadSection loads one engine section, filling engine defaults when the
+// section is absent from the file. It errors like readConfig when the file
+// itself is unreadable or corrupt.
+func ReadSection[T any](get func(*SqlConfig) *T, set func(*SqlConfig, *T), fillDefaults func(*T)) (*T, error) {
+	tmpConf, err := readConfig()
+	if err != nil {
+		return nil, err
 	}
+	if sec := get(&tmpConf); sec != nil {
+		return sec, nil
+	}
+	sec := new(T)
+	fillDefaults(sec)
+	set(&tmpConf, sec)
+	return sec, nil
+}
+
+// WriteSection replaces one engine section, preserving the others.
+func WriteSection[T any](get func(*SqlConfig) *T, set func(*SqlConfig, *T), v *T) error {
+	tmpConf := readSqlConfig()
+	set(&tmpConf, v)
+	return writeSqlConfig(tmpConf)
+}
+
+// Per-section accessors for the generic helpers above.
+var (
+	getMysql       = func(c *SqlConfig) *MysqlConfig { return c.Mysql }
+	setMysql       = func(c *SqlConfig, s *MysqlConfig) { c.Mysql = s }
+	getRedis       = func(c *SqlConfig) *RedisConfig { return c.Redis }
+	setRedis       = func(c *SqlConfig, s *RedisConfig) { c.Redis = s }
+	getSqlite      = func(c *SqlConfig) *SqliteConfig { return c.Sqlite }
+	setSqlite      = func(c *SqlConfig, s *SqliteConfig) { c.Sqlite = s }
+	getPostgres    = func(c *SqlConfig) *PostgresConfig { return c.Postgres }
+	setPostgres    = func(c *SqlConfig, s *PostgresConfig) { c.Postgres = s }
+	getSqlServer   = func(c *SqlConfig) *SqlServerConfig { return c.SqlServer }
+	setSqlServer   = func(c *SqlConfig, s *SqlServerConfig) { c.SqlServer = s }
+	getOracle      = func(c *SqlConfig) *OracleConfig { return c.Oracle }
+	setOracle      = func(c *SqlConfig, s *OracleConfig) { c.Oracle = s }
+	getOpenObserve = func(c *SqlConfig) *OpenObserveConfig { return c.OpenObserve }
+	setOpenObserve = func(c *SqlConfig, s *OpenObserveConfig) { c.OpenObserve = s }
+	getUI          = func(c *SqlConfig) *UIConfig { return c.UI }
+	setUI          = func(c *SqlConfig, s *UIConfig) { c.UI = s }
+)
+
+func ReadMySqlConfig() (*MysqlConfig, error) {
+	return ReadSection(getMysql, setMysql, defaultMysql)
+}
+
+func WriteMysqlConfig(mysqlConfig *MysqlConfig) error {
+	return WriteSection(getMysql, setMysql, mysqlConfig)
+}
+
+func ReadRedisConfig() (*RedisConfig, error) {
+	return ReadSection(getRedis, setRedis, defaultRedis)
+}
+
+func WriteRedisConfig(redisConfig *RedisConfig) error {
+	return WriteSection(getRedis, setRedis, redisConfig)
+}
+
+func ReadSqliteConfig() (*SqliteConfig, error) {
+	return ReadSection(getSqlite, setSqlite, defaultSqlite)
+}
+
+func WriteSqliteConfig(sqliteConfig *SqliteConfig) error {
+	return WriteSection(getSqlite, setSqlite, sqliteConfig)
+}
+
+func ReadPostgresConfig() (*PostgresConfig, error) {
+	return ReadSection(getPostgres, setPostgres, defaultPostgres)
+}
+
+func WritePostgresConfig(postgresConfig *PostgresConfig) error {
+	return WriteSection(getPostgres, setPostgres, postgresConfig)
+}
+
+func ReadSqlServerConfig() (*SqlServerConfig, error) {
+	return ReadSection(getSqlServer, setSqlServer, defaultSqlServer)
+}
+
+func WriteSqlServerConfig(sqlserverConfig *SqlServerConfig) error {
+	return WriteSection(getSqlServer, setSqlServer, sqlserverConfig)
+}
+
+func ReadOracleConfig() (*OracleConfig, error) {
+	return ReadSection(getOracle, setOracle, defaultOracle)
+}
+
+func WriteOracleConfig(oracleConfig *OracleConfig) error {
+	return WriteSection(getOracle, setOracle, oracleConfig)
+}
+
+func ReadOpenObserveConfig() OpenObserveConfig {
+	if c, err := ReadSection(getOpenObserve, setOpenObserve, func(s *OpenObserveConfig) { *s = defaultOobe() }); err == nil {
+		return *c
+	}
+	return defaultOobe()
+}
+
+func WriteOpenObserveConfig(cfg OpenObserveConfig) error {
+	return WriteSection(getOpenObserve, setOpenObserve, &cfg)
+}
+
+func ReadUIConfig() (*UIConfig, error) {
+	return ReadSection(getUI, setUI, func(u *UIConfig) { *u = *DefaultUIConfig() })
+}
+
+func WriteUIConfig(uiConfig *UIConfig) error {
+	return WriteSection(getUI, setUI, uiConfig)
 }
 
 // legacyConfigFile is the pre-YAML JSON config location, derived from the
@@ -250,170 +393,6 @@ func writeSqlConfig(tmpConf SqlConfig) error {
 		return err
 	}
 	return os.WriteFile(ConfigFile, y, 0600)
-}
-
-func ReadMySqlConfig() (*MysqlConfig, error) {
-	tmpConf, err := readConfig()
-	if err != nil {
-		return nil, err
-	}
-	if tmpConf.Mysql == nil {
-		tmpConf.Mysql = &MysqlConfig{
-			UserName: "root",
-			Host:     "127.0.0.1",
-			Port:     "3306",
-			DbName:   "test_db",
-		}
-	}
-	return tmpConf.Mysql, nil
-}
-
-func WriteMysqlConfig(mysqlConfig *MysqlConfig) error {
-	tmpConf := readSqlConfig()
-	tmpConf.Mysql = mysqlConfig
-	return writeSqlConfig(tmpConf)
-}
-
-func ReadRedisConfig() (*RedisConfig, error) {
-	tmpConf, err := readConfig()
-	if err != nil {
-		return nil, err
-	}
-	if tmpConf.Redis == nil {
-		tmpConf.Redis = &RedisConfig{
-			Host:   "127.0.0.1",
-			Port:   "6379",
-			RdbNum: "0",
-		}
-	}
-	return tmpConf.Redis, nil
-}
-
-func WriteRedisConfig(redisConfig *RedisConfig) error {
-	tmpConf := readSqlConfig()
-	tmpConf.Redis = redisConfig
-	return writeSqlConfig(tmpConf)
-}
-
-func ReadSqliteConfig() (*SqliteConfig, error) {
-	tmpConf, err := readConfig()
-	if err != nil {
-		return nil, err
-	}
-	if tmpConf.Sqlite == nil {
-		tmpConf.Sqlite = &SqliteConfig{
-			FilePath: filepath.Join(dataPath, "sqlite.default"),
-		}
-	}
-	return tmpConf.Sqlite, nil
-}
-
-func WriteSqliteConfig(sqliteConfig *SqliteConfig) error {
-	tmpConf := readSqlConfig()
-	tmpConf.Sqlite = sqliteConfig
-	return writeSqlConfig(tmpConf)
-}
-
-func ReadPostgresConfig() (*PostgresConfig, error) {
-	tmpConf, err := readConfig()
-	if err != nil {
-		return nil, err
-	}
-	if tmpConf.Postgres == nil {
-		tmpConf.Postgres = &PostgresConfig{
-			UserName: "postgres",
-			Host:     "127.0.0.1",
-			Port:     "5432",
-			DbName:   "postgres",
-			SslMode:  "disable",
-		}
-	}
-	return tmpConf.Postgres, nil
-}
-
-func WritePostgresConfig(postgresConfig *PostgresConfig) error {
-	tmpConf := readSqlConfig()
-	tmpConf.Postgres = postgresConfig
-	return writeSqlConfig(tmpConf)
-}
-
-func ReadSqlServerConfig() (*SqlServerConfig, error) {
-	tmpConf, err := readConfig()
-	if err != nil {
-		return nil, err
-	}
-	if tmpConf.SqlServer == nil {
-		tmpConf.SqlServer = &SqlServerConfig{
-			UserName: "sa",
-			Host:     "127.0.0.1",
-			Port:     "1433",
-			DbName:   "master",
-		}
-	}
-	return tmpConf.SqlServer, nil
-}
-
-func WriteSqlServerConfig(sqlserverConfig *SqlServerConfig) error {
-	tmpConf := readSqlConfig()
-	tmpConf.SqlServer = sqlserverConfig
-	return writeSqlConfig(tmpConf)
-}
-
-func ReadOracleConfig() (*OracleConfig, error) {
-	tmpConf, err := readConfig()
-	if err != nil {
-		return nil, err
-	}
-	if tmpConf.Oracle == nil {
-		tmpConf.Oracle = &OracleConfig{
-			UserName: "system",
-			Host:     "127.0.0.1",
-			Port:     "1521",
-			DbName:   "xe",
-		}
-	}
-	return tmpConf.Oracle, nil
-}
-
-func WriteOracleConfig(oracleConfig *OracleConfig) error {
-	tmpConf := readSqlConfig()
-	tmpConf.Oracle = oracleConfig
-	return writeSqlConfig(tmpConf)
-}
-
-func ReadOpenObserveConfig() OpenObserveConfig {
-	tmpConf, err := readConfig()
-	if err != nil || tmpConf.OpenObserve == nil {
-		return OpenObserveConfig{
-			Host: "localhost",
-			Port: "5080",
-			Org:  "default",
-		}
-	}
-	return *tmpConf.OpenObserve
-}
-
-func WriteOpenObserveConfig(cfg OpenObserveConfig) error {
-	tmpConf := readSqlConfig()
-	tmpConf.OpenObserve = &cfg
-	return writeSqlConfig(tmpConf)
-}
-
-func ReadUIConfig() (*UIConfig, error) {
-	tmpConf, err := readConfig()
-	if err != nil {
-		return nil, err
-	}
-	if tmpConf.UI == nil {
-		tmpConf.UI = DefaultUIConfig()
-	}
-	return tmpConf.UI, nil
-}
-
-func WriteUIConfig(uiConfig *UIConfig) error {
-	tmpConf := readSqlConfig()
-	tmpConf.UI = uiConfig
-	return writeSqlConfig(tmpConf)
 }
 
 func SetDefaultLog() error {

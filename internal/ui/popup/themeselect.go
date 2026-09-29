@@ -26,12 +26,11 @@ func init() {
 type themeSelect struct {
 	names    []string // all built-in theme names, sorted
 	filtered []string // names matching the current filter, best first
-	input    []rune   // filter text
-	cursor   int      // rune position of the input cursor
-	sel      int      // highlighted index within filtered
-	offset   int      // first visible list row
-	original string   // theme active when the popup opened (esc restores it)
-	preview  string   // last theme name emitted as a preview
+	input    ui.LineInput
+	sel      int    // highlighted index within filtered
+	offset   int    // first visible list row
+	original string // theme active when the popup opened (esc restores it)
+	preview  string // last theme name emitted as a preview
 }
 
 const (
@@ -42,11 +41,11 @@ const (
 func newThemeSelect(original, arg string) *themeSelect {
 	t := &themeSelect{
 		names:    theme.Names(),
-		input:    []rune(strings.TrimSpace(arg)),
+		input:    ui.NewLineInput(strings.TrimSpace(arg)),
 		original: original,
 		preview:  original,
 	}
-	t.cursor = len(t.input)
+	t.input.Placeholder = " type to filter"
 	t.refilter()
 	for i, n := range t.filtered {
 		if n == original {
@@ -75,7 +74,7 @@ func (t *themeSelect) refilter() {
 	if keep == "" {
 		keep = t.preview
 	}
-	pattern := strings.TrimSpace(string(t.input))
+	pattern := strings.TrimSpace(t.input.String())
 	if pattern == "" {
 		t.filtered = t.names
 	} else {
@@ -130,9 +129,7 @@ func (t *themeSelect) move(delta int) tea.Cmd {
 
 func (t *themeSelect) Update(msg tea.Msg) (ui.Overlay, tea.Cmd) {
 	if pm, ok := msg.(tea.PasteMsg); ok {
-		if text := []rune(pasteSanitize(pm.Content)); len(text) > 0 {
-			t.input = append(t.input[:t.cursor], append(text, t.input[t.cursor:]...)...)
-			t.cursor += len(text)
+		if t.input.Paste(pm.Content) {
 			t.refilter()
 			return t, t.previewCmd()
 		}
@@ -160,42 +157,33 @@ func (t *themeSelect) Update(msg tea.Msg) (ui.Overlay, tea.Cmd) {
 	case "pgdown":
 		return t, t.move(themePageJump)
 	case "left":
-		if t.cursor > 0 {
-			t.cursor--
-		}
+		t.input.Left()
 		return t, nil
 	case "right":
-		if t.cursor < len(t.input) {
-			t.cursor++
-		}
+		t.input.Right()
 		return t, nil
 	case "home", "ctrl+a":
-		t.cursor = 0
+		t.input.Home()
 		return t, nil
 	case "end", "ctrl+e":
-		t.cursor = len(t.input)
+		t.input.End()
 		return t, nil
 	case "backspace":
-		if t.cursor > 0 {
-			t.input = append(t.input[:t.cursor-1], t.input[t.cursor:]...)
-			t.cursor--
+		if t.input.Backspace() {
 			t.refilter()
 			return t, t.previewCmd()
 		}
 		return t, nil
 	case "ctrl+u":
-		if len(t.input) > 0 {
-			t.input = nil
-			t.cursor = 0
+		if t.input.Len() > 0 {
+			t.input.Clear()
 			t.refilter()
 			return t, t.previewCmd()
 		}
 		return t, nil
 	}
 	if key.Text != "" {
-		text := []rune(key.Text)
-		t.input = append(t.input[:t.cursor], append(append([]rune{}, text...), t.input[t.cursor:]...)...)
-		t.cursor += len(text)
+		t.input.InsertKey(key.Text)
 		t.refilter()
 		return t, t.previewCmd()
 	}
@@ -238,6 +226,12 @@ func themeVisibleRows(height, n int) int {
 	return rows
 }
 
+// inputLine renders the filter prompt with the shared input renderer; the
+// placeholder (set at construction) shows while the filter is empty.
+func (t *themeSelect) inputLine(inner int, th *theme.Theme) string {
+	return th.Subtle.Render("filter ") + t.input.Render(th)
+}
+
 // ensureVisible adjusts the scroll offset so the highlight stays in view.
 func (t *themeSelect) ensureVisible(rows int) {
 	if t.sel < t.offset {
@@ -252,26 +246,6 @@ func (t *themeSelect) ensureVisible(rows int) {
 	if t.offset < 0 {
 		t.offset = 0
 	}
-}
-
-func (t *themeSelect) inputLine(inner int, th *theme.Theme) string {
-	prompt := th.Subtle.Render("filter ")
-	cur := t.cursor
-	if cur > len(t.input) {
-		cur = len(t.input)
-	}
-	before := string(t.input[:cur])
-	at := " "
-	after := ""
-	if cur < len(t.input) {
-		at = string(t.input[cur])
-		after = string(t.input[cur+1:])
-	}
-	line := prompt + th.Input.Render(before) + th.ListSelected.Render(at) + th.Input.Render(after)
-	if len(t.input) == 0 {
-		line += th.Placeholder.Render(" type to filter")
-	}
-	return line
 }
 
 func (t *themeSelect) View(width, height int, th *theme.Theme) string {

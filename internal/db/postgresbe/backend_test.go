@@ -3,6 +3,8 @@ package postgresbe
 import (
 	"strings"
 	"testing"
+
+	"github.com/LinPr/sqltui/internal/db"
 )
 
 func TestConfigDsn(t *testing.T) {
@@ -51,8 +53,8 @@ func TestHasReturningClause(t *testing.T) {
 	}
 	for _, tt := range tests {
 		words := strings.Fields(tt.stmt)
-		if got := hasReturningClause(words); got != tt.want {
-			t.Errorf("hasReturningClause(%q) = %v, want %v", tt.stmt, got, tt.want)
+		if got := db.HasReturningClause(words); got != tt.want {
+			t.Errorf("HasReturningClause(%q) = %v, want %v", tt.stmt, got, tt.want)
 		}
 	}
 }

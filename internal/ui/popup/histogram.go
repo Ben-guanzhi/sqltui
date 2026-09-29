@@ -22,7 +22,7 @@ func init() {
 		if f == nil || f.NumCols() == 0 {
 			return nil, errors.New("histogram: no data loaded")
 		}
-		b := &histBuilder{frame: f, input: histNewInput("10")}
+		b := &histBuilder{frame: f, input: ui.NewLineInput("10")}
 		if arg = strings.TrimSpace(arg); arg != "" {
 			idx := f.ColumnIndex(arg)
 			if idx < 0 {
@@ -55,7 +55,7 @@ type histBuilder struct {
 	colName  string
 	values   []float64
 
-	input   histInput
+	input   ui.LineInput
 	errText string
 }
 
@@ -302,65 +302,4 @@ func histClampInt(v, lo, hi int) int {
 		return hi
 	}
 	return v
-}
-
-// histInput is a minimal single-line text input (value + cursor).
-type histInput struct {
-	val []rune
-	cur int
-}
-
-func histNewInput(initial string) histInput {
-	r := []rune(initial)
-	return histInput{val: r, cur: len(r)}
-}
-
-func (in *histInput) String() string { return string(in.val) }
-
-// Handle applies one key press to the input state.
-func (in *histInput) Handle(key tea.KeyPressMsg) {
-	switch key.String() {
-	case "backspace":
-		if in.cur > 0 {
-			in.val = append(in.val[:in.cur-1], in.val[in.cur:]...)
-			in.cur--
-		}
-	case "delete":
-		if in.cur < len(in.val) {
-			in.val = append(in.val[:in.cur], in.val[in.cur+1:]...)
-		}
-	case "left":
-		if in.cur > 0 {
-			in.cur--
-		}
-	case "right":
-		if in.cur < len(in.val) {
-			in.cur++
-		}
-	case "home", "ctrl+a":
-		in.cur = 0
-	case "end", "ctrl+e":
-		in.cur = len(in.val)
-	case "ctrl+u":
-		in.val = in.val[:0]
-		in.cur = 0
-	default:
-		if key.Text != "" {
-			ins := []rune(key.Text)
-			in.val = append(in.val[:in.cur], append(ins, in.val[in.cur:]...)...)
-			in.cur += len(ins)
-		}
-	}
-}
-
-// Render draws the value with a block cursor.
-func (in *histInput) Render(th *theme.Theme) string {
-	before := string(in.val[:in.cur])
-	under := " "
-	after := ""
-	if in.cur < len(in.val) {
-		under = string(in.val[in.cur])
-		after = string(in.val[in.cur+1:])
-	}
-	return th.Input.Render(before) + th.ListSelected.Render(under) + th.Input.Render(after)
 }

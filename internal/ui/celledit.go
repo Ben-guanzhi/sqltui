@@ -66,8 +66,16 @@ func quoteCol(be db.Backend, name string) string {
 }
 
 // sqlLiteral wraps a string value in single quotes with embedded quotes
-// doubled.
-func sqlLiteral(s string) string {
+// doubled. On MySQL (default sql_mode) the backslash is an escape character,
+// so backslashes are doubled too — otherwise a value ending in a backslash
+// would swallow the closing quote and rewrite the statement (worst case a
+// corrupted WHERE clause on DELETE). Everywhere else (PostgreSQL standard
+// conforming strings, SQL Server, Oracle, SQLite) the backslash is literal
+// and must be left alone.
+func sqlLiteral(be db.Backend, s string) string {
+	if be != nil && be.Kind() == "mysql" {
+		s = strings.ReplaceAll(s, `\`, `\\`)
+	}
 	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
 }
 
@@ -104,14 +112,14 @@ func parseTyped(val string, t data.DType) (any, error) {
 // The table identifier is dialect-quoted; PK values are read from frame. It
 // errors when a named PK column is absent from the frame.
 func buildUpdate(be db.Backend, table string, pks []string, frame *data.Frame, row int, colName, val string) (string, error) {
-	setClause := quoteCol(be, colName) + "=" + sqlLiteral(val)
+	setClause := quoteCol(be, colName) + "=" + sqlLiteral(be, val)
 	var where []string
 	for _, pk := range pks {
 		idx := frame.ColumnIndex(pk)
 		if idx < 0 {
 			return "", fmt.Errorf("primary key column not found: %s", pk)
 		}
-		where = append(where, quoteCol(be, pk)+"="+sqlLiteral(frame.CellString(row, idx)))
+		where = append(where, quoteCol(be, pk)+"="+sqlLiteral(be, frame.CellString(row, idx)))
 	}
 	return "UPDATE " + quoteIdent(be, table) + " SET " + setClause + " WHERE " + strings.Join(where, " AND "), nil
 }
@@ -136,7 +144,7 @@ func buildDelete(be db.Backend, table string, pks []string, frame *data.Frame, r
 	if len(pks) == 1 {
 		vals := make([]string, 0, len(rows))
 		for _, r := range rows {
-			vals = append(vals, sqlLiteral(frame.CellString(r, pkIdx[0])))
+			vals = append(vals, sqlLiteral(be, frame.CellString(r, pkIdx[0])))
 		}
 		return "DELETE FROM " + tbl + " WHERE " + quoteCol(be, pks[0]) + " IN (" + strings.Join(vals, ",") + ")", nil
 	}
@@ -144,7 +152,7 @@ func buildDelete(be db.Backend, table string, pks []string, frame *data.Frame, r
 	for _, r := range rows {
 		ands := make([]string, 0, len(pks))
 		for i, pk := range pks {
-			ands = append(ands, quoteCol(be, pk)+"="+sqlLiteral(frame.CellString(r, pkIdx[i])))
+			ands = append(ands, quoteCol(be, pk)+"="+sqlLiteral(be, frame.CellString(r, pkIdx[i])))
 		}
 		ors = append(ors, "("+strings.Join(ands, " AND ")+")")
 	}

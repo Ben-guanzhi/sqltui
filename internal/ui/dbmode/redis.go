@@ -19,11 +19,7 @@ import (
 // key list is only scanned when the section is first opened (or rescanned).
 type keySection struct {
 	keyType string
-	open    bool
-	loading bool
-	loaded  bool
-	errText string
-	keys    []string
+	ui.LazyGroup[string]
 }
 
 // keysLoadedMsg delivers one section's scan result.
@@ -42,16 +38,15 @@ type keyBrowser struct {
 	kv       db.KVBackend
 	openTabs int // open tabs when the browser was built (see closeCmd)
 	sections []keySection
-	cursor   int // index into rows()
-	offset   int
-	viewLen  int
+	state    ui.ListState
 
-	filter    []rune // substring the shown keys must contain
-	filtering bool   // keys currently go to the filter input
+	filter    ui.LineInput // substring the shown keys must contain
+	filtering bool         // keys currently go to the filter input
 }
 
 func newKeyBrowser(kv db.KVBackend, openTabs int) *keyBrowser {
-	b := &keyBrowser{kv: kv, openTabs: openTabs, viewLen: 10}
+	b := &keyBrowser{kv: kv, openTabs: openTabs}
+	b.state.ViewLen = 10
 	for _, kt := range redisbe.KeyTypes {
 		b.sections = append(b.sections, keySection{keyType: kt})
 	}
@@ -88,25 +83,21 @@ func (b *keyBrowser) Init() tea.Cmd {
 	if len(b.sections) == 0 {
 		return nil
 	}
-	b.sections[0].open = true
+	b.sections[0].Open = true
 	return b.scanSection(0)
 }
 
-// scanSection starts the asynchronous key scan for one section.
+// scanSection starts the asynchronous key scan for one section, dropping any
+// cached keys first.
 func (b *keyBrowser) scanSection(i int) tea.Cmd {
 	s := &b.sections[i]
-	if s.loading {
-		return nil
-	}
-	s.loading = true
-	s.loaded = false
-	s.errText = ""
-	s.keys = nil
 	kv, kt := b.kv, s.keyType
-	return func() tea.Msg {
-		keys, err := kv.ScanKeys(kt)
-		return keysLoadedMsg{keyType: kt, keys: keys, err: err}
-	}
+	return s.Reload(func() tea.Cmd {
+		return func() tea.Msg {
+			keys, err := kv.ScanKeys(kt)
+			return keysLoadedMsg{keyType: kt, keys: keys, err: err}
+		}
+	})
 }
 
 // browserRow is one display line: a section header (key == "") or a key.
@@ -121,7 +112,7 @@ func (r browserRow) selectable() bool { return r.note == "" }
 // matchKeys returns the section keys that contain the filter substring
 // (case-insensitive); with an empty filter every key passes.
 func (b *keyBrowser) matchKeys(keys []string) []string {
-	pat := strings.ToLower(strings.TrimSpace(string(b.filter)))
+	pat := strings.ToLower(strings.TrimSpace(b.filter.String()))
 	if pat == "" {
 		return keys
 	}
@@ -137,23 +128,23 @@ func (b *keyBrowser) matchKeys(keys []string) []string {
 // rows flattens the sections into display lines, applying the key filter to
 // the loaded sections.
 func (b *keyBrowser) rows() []browserRow {
-	filtered := strings.TrimSpace(string(b.filter)) != ""
+	filtered := strings.TrimSpace(b.filter.String()) != ""
 	var out []browserRow
 	for i := range b.sections {
 		s := &b.sections[i]
 		out = append(out, browserRow{section: i})
-		if !s.open {
+		if !s.Open {
 			continue
 		}
 		switch {
-		case s.loading:
+		case s.Loading:
 			out = append(out, browserRow{section: i, note: "loading..."})
-		case s.errText != "":
-			out = append(out, browserRow{section: i, note: "error: " + s.errText})
-		case len(s.keys) == 0:
+		case s.Err != nil:
+			out = append(out, browserRow{section: i, note: "error: " + s.Err.Error()})
+		case len(s.Items) == 0:
 			out = append(out, browserRow{section: i, note: "(no keys)"})
 		default:
-			keys := b.matchKeys(s.keys)
+			keys := b.matchKeys(s.Items)
 			if len(keys) == 0 && filtered {
 				out = append(out, browserRow{section: i, note: "(no matching keys)"})
 				continue
@@ -166,16 +157,6 @@ func (b *keyBrowser) rows() []browserRow {
 	return out
 }
 
-// move advances the cursor to the next selectable row in direction dir.
-func (b *keyBrowser) move(rows []browserRow, dir int) {
-	for j := b.cursor + dir; j >= 0 && j < len(rows); j += dir {
-		if rows[j].selectable() {
-			b.cursor = j
-			return
-		}
-	}
-}
-
 func (b *keyBrowser) Update(msg tea.Msg) (ui.Overlay, tea.Cmd) {
 	switch m := msg.(type) {
 	case keysLoadedMsg:
@@ -184,15 +165,9 @@ func (b *keyBrowser) Update(msg tea.Msg) (ui.Overlay, tea.Cmd) {
 			if s.keyType != m.keyType {
 				continue
 			}
-			s.loading = false
-			s.loaded = true
-			if m.err != nil {
-				s.errText = m.err.Error()
-			} else {
-				s.keys = m.keys
-			}
+			s.Deliver(m.keys, m.err)
 		}
-		b.clampCursor()
+		ui.ClampListCursor(&b.state, b.rows(), browserRow.selectable)
 		return b, nil
 
 	case tea.KeyPressMsg:
@@ -204,9 +179,9 @@ func (b *keyBrowser) Update(msg tea.Msg) (ui.Overlay, tea.Cmd) {
 		case "q":
 			return b, b.closeCmd()
 		case "esc":
-			if len(b.filter) > 0 {
-				b.filter = nil
-				b.clampCursor()
+			if b.filter.Len() > 0 {
+				b.filter.Clear()
+				ui.ClampListCursor(&b.state, b.rows(), browserRow.selectable)
 				return b, nil
 			}
 			return b, b.escCmd()
@@ -214,22 +189,22 @@ func (b *keyBrowser) Update(msg tea.Msg) (ui.Overlay, tea.Cmd) {
 			b.filtering = true
 			return b, nil
 		case "up", "k":
-			b.move(rows, -1)
+			ui.MoveListCursor(&b.state, rows, -1, browserRow.selectable)
 		case "down", "j":
-			b.move(rows, +1)
+			ui.MoveListCursor(&b.state, rows, +1, browserRow.selectable)
 		case "g", "home":
-			b.cursor = 0
+			b.state.Cursor = 0
 		case "G", "end":
-			b.cursor = len(rows) - 1
-			if b.cursor >= 0 && !rows[b.cursor].selectable() {
-				b.move(rows, -1)
+			b.state.Cursor = len(rows) - 1
+			if b.state.Cursor >= 0 && !rows[b.state.Cursor].selectable() {
+				ui.MoveListCursor(&b.state, rows, -1, browserRow.selectable)
 			}
 		case "r":
 			return b, b.rescan()
 		case "enter":
 			return b, b.activate(rows)
 		}
-		b.scrollToCursor(rows)
+		b.state.ScrollToCursor(len(rows), b.state.ViewLen)
 		return b, nil
 	}
 	return b, nil
@@ -241,42 +216,38 @@ func (b *keyBrowser) filterKey(m tea.KeyPressMsg) (ui.Overlay, tea.Cmd) {
 	case "esc":
 		// esc clears the filter (and leaves the input); a second esc on the
 		// browser then closes it.
-		b.filter = nil
+		b.filter.Clear()
 		b.filtering = false
-		b.clampCursor()
+		ui.ClampListCursor(&b.state, b.rows(), browserRow.selectable)
 		return b, nil
 	case "enter":
 		// Keep the narrowed list and give the keys back to navigation.
 		b.filtering = false
 		return b, nil
 	case "up":
-		b.move(b.rows(), -1)
-		b.scrollToCursor(b.rows())
+		ui.MoveListCursor(&b.state, b.rows(), -1, browserRow.selectable)
+		b.state.ScrollToCursor(len(b.rows()), b.state.ViewLen)
 		return b, nil
 	case "down":
-		b.move(b.rows(), +1)
-		b.scrollToCursor(b.rows())
+		ui.MoveListCursor(&b.state, b.rows(), +1, browserRow.selectable)
+		b.state.ScrollToCursor(len(b.rows()), b.state.ViewLen)
 		return b, nil
 	case "backspace":
-		if len(b.filter) > 0 {
-			b.filter = b.filter[:len(b.filter)-1]
-			b.clampCursor()
+		if b.filter.Backspace() {
+			ui.ClampListCursor(&b.state, b.rows(), browserRow.selectable)
 		}
 		return b, nil
 	case "ctrl+u":
-		b.filter = nil
-		b.clampCursor()
+		b.filter.Clear()
+		ui.ClampListCursor(&b.state, b.rows(), browserRow.selectable)
 		return b, nil
 	case "ctrl+c":
 		return b, ui.CloseOverlay
 	}
 	if t := m.Text; t != "" {
-		for _, r := range t {
-			if r >= ' ' && r != 0x7f {
-				b.filter = append(b.filter, r)
-			}
+		if b.filter.InsertKey(t) {
+			ui.ClampListCursor(&b.state, b.rows(), browserRow.selectable)
 		}
-		b.clampCursor()
 	}
 	return b, nil
 }
@@ -286,14 +257,12 @@ func (b *keyBrowser) rescan() tea.Cmd {
 	var cmds []tea.Cmd
 	for i := range b.sections {
 		s := &b.sections[i]
-		if s.open {
+		if s.Open {
 			if cmd := b.scanSection(i); cmd != nil {
 				cmds = append(cmds, cmd)
 			}
 		} else {
-			s.loaded = false
-			s.errText = ""
-			s.keys = nil
+			s.Unload()
 		}
 	}
 	if len(cmds) == 0 {
@@ -305,17 +274,17 @@ func (b *keyBrowser) rescan() tea.Cmd {
 // activate handles enter: toggle a section (lazily scanning it) or open the
 // value viewer for a key.
 func (b *keyBrowser) activate(rows []browserRow) tea.Cmd {
-	if b.cursor < 0 || b.cursor >= len(rows) {
+	if b.state.Cursor < 0 || b.state.Cursor >= len(rows) {
 		return nil
 	}
-	r := rows[b.cursor]
+	r := rows[b.state.Cursor]
 	if !r.selectable() {
 		return nil
 	}
 	if r.key == "" { // section header
 		s := &b.sections[r.section]
-		s.open = !s.open
-		if s.open && !s.loaded {
+		s.Open = !s.Open
+		if s.Open && !s.Loaded {
 			return b.scanSection(r.section)
 		}
 		return nil
@@ -323,46 +292,6 @@ func (b *keyBrowser) activate(rows []browserRow) tea.Cmd {
 	kv, key := b.kv, r.key
 	viewer := newValueViewer(key, func() (string, error) { return kv.Value(key) })
 	return func() tea.Msg { return ui.PushOverlayMsg{Overlay: viewer} }
-}
-
-// clampCursor keeps the cursor on a selectable row after the rows changed.
-func (b *keyBrowser) clampCursor() {
-	rows := b.rows()
-	if len(rows) == 0 {
-		b.cursor = 0
-		return
-	}
-	if b.cursor >= len(rows) {
-		b.cursor = len(rows) - 1
-	}
-	if b.cursor < 0 {
-		b.cursor = 0
-	}
-	if !rows[b.cursor].selectable() {
-		b.move(rows, -1)
-		if !rows[b.cursor].selectable() {
-			b.move(rows, +1)
-		}
-	}
-}
-
-func (b *keyBrowser) scrollToCursor(rows []browserRow) {
-	vl := b.viewLen
-	if vl < 1 {
-		vl = 1
-	}
-	if b.cursor < b.offset {
-		b.offset = b.cursor
-	}
-	if b.cursor >= b.offset+vl {
-		b.offset = b.cursor - vl + 1
-	}
-	if maxOff := len(rows) - vl; b.offset > maxOff {
-		b.offset = maxOff
-	}
-	if b.offset < 0 {
-		b.offset = 0
-	}
 }
 
 func (b *keyBrowser) View(width, height int, th *theme.Theme) string {
@@ -376,7 +305,7 @@ func (b *keyBrowser) View(width, height int, th *theme.Theme) string {
 	inner := boxW - 2
 
 	rows := b.rows()
-	showFilter := b.filtering || len(b.filter) > 0
+	showFilter := b.filtering || b.filter.Len() > 0
 	avail := height - 2 - 1 // borders + footer hint
 	if showFilter {
 		avail-- // filter line
@@ -387,17 +316,17 @@ func (b *keyBrowser) View(width, height int, th *theme.Theme) string {
 	if avail > len(rows) {
 		avail = len(rows)
 	}
-	b.viewLen = avail
-	if b.viewLen < 1 {
-		b.viewLen = 1
+	b.state.ViewLen = avail
+	if b.state.ViewLen < 1 {
+		b.state.ViewLen = 1
 	}
-	b.scrollToCursor(rows)
+	b.state.ScrollToCursor(len(rows), b.state.ViewLen)
 
 	var lines []string
 	if showFilter {
-		lines = append(lines, ui.FilterLine(string(b.filter), b.filtering, inner, "type to filter keys", th))
+		lines = append(lines, ui.FilterLine(b.filter.String(), b.filtering, inner, "type to filter keys", th))
 	}
-	for i := b.offset; i < b.offset+b.viewLen && i < len(rows); i++ {
+	for i := b.state.Offset; i < b.state.Offset+b.state.ViewLen && i < len(rows); i++ {
 		r := rows[i]
 		s := b.sections[r.section]
 		switch {
@@ -405,57 +334,48 @@ func (b *keyBrowser) View(width, height int, th *theme.Theme) string {
 			lines = append(lines, th.Subtle.Render(ansi.Truncate("   "+r.note, inner, "…")))
 		case r.key == "":
 			marker := "+"
-			if s.open {
+			if s.Open {
 				marker = "-"
 			}
 			label := " " + marker + " " + s.keyType
-			if i == b.cursor {
-				lines = append(lines, th.ListSelected.Render(browserPad(label, inner)))
+			if i == b.state.Cursor {
+				lines = append(lines, th.ListSelected.Render(ui.Pad(label, inner)))
 			} else {
 				lines = append(lines, th.PopupTitle.Render(ansi.Truncate(label, inner, "…")))
 			}
-		case i == b.cursor:
-			if len(b.filter) > 0 {
+		case i == b.state.Cursor:
+			if b.filter.Len() > 0 {
 				prefix := " > "
 				keyW := inner - ansi.StringWidth(prefix)
 				if keyW < 0 {
 					keyW = 0
 				}
-				lines = append(lines, th.ListSelected.Render(prefix)+ui.HighlightPad(r.key, string(b.filter), keyW, th.Match, th.ListSelected))
+				lines = append(lines, th.ListSelected.Render(prefix)+ui.HighlightPad(r.key, b.filter.String(), keyW, th.Match, th.ListSelected))
 			} else {
-				lines = append(lines, th.ListSelected.Render(browserPad(" > "+r.key, inner)))
+				lines = append(lines, th.ListSelected.Render(ui.Pad(" > "+r.key, inner)))
 			}
 		default:
-			if len(b.filter) > 0 {
+			if b.filter.Len() > 0 {
 				prefix := "   "
 				keyW := inner - ansi.StringWidth(prefix)
 				if keyW < 0 {
 					keyW = 0
 				}
-				lines = append(lines, th.ListItem.Render(prefix)+ui.HighlightPad(r.key, string(b.filter), keyW, th.Match, th.ListItem))
+				lines = append(lines, th.ListItem.Render(prefix)+ui.HighlightPad(r.key, b.filter.String(), keyW, th.Match, th.ListItem))
 			} else {
-				lines = append(lines, th.ListItem.Render(browserPad("   "+r.key, inner)))
+				lines = append(lines, th.ListItem.Render(ui.Pad("   "+r.key, inner)))
 			}
 		}
 	}
 	hint := " enter open · / filter · r rescan · q close · esc back"
 	if b.filtering {
 		hint = " enter done · esc clear · ↑↓ move"
-	} else if len(b.filter) > 0 {
+	} else if b.filter.Len() > 0 {
 		hint = " enter open · / edit filter · esc clear filter"
 	}
 	lines = append(lines, th.Subtle.Render(hint))
 
 	return ui.Box("keys "+b.kv.Title(), strings.Join(lines, "\n"), boxW, th)
-}
-
-// browserPad truncates or pads s to exactly w display cells.
-func browserPad(s string, w int) string {
-	s = ansi.Truncate(s, w, "…")
-	if pad := w - ansi.StringWidth(s); pad > 0 {
-		s += strings.Repeat(" ", pad)
-	}
-	return s
 }
 
 // --- value viewer -----------------------------------------------------------------
@@ -630,7 +550,7 @@ type redisDoneMsg struct {
 // command asynchronously and shows the result in the value viewer.
 type redisPrompt struct {
 	kv      db.KVBackend
-	input   []rune
+	input   ui.LineInput
 	sugg    []redisbe.CommandHelp
 	sel     int
 	cycling bool // true while tab is cycling through sugg
@@ -639,7 +559,7 @@ type redisPrompt struct {
 }
 
 func newRedisPrompt(ctx ui.AppContext, arg string) *redisPrompt {
-	p := &redisPrompt{kv: ctx.KV(), input: []rune(arg)}
+	p := &redisPrompt{kv: ctx.KV(), input: ui.NewLineInput(arg)}
 	p.recompute()
 	return p
 }
@@ -650,7 +570,7 @@ func (p *redisPrompt) recompute() {
 	p.sugg = nil
 	p.sel = 0
 	p.cycling = false
-	text := strings.ToUpper(strings.TrimLeft(string(p.input), " "))
+	text := strings.ToUpper(strings.TrimLeft(p.input.String(), " "))
 	if text == "" {
 		return
 	}
@@ -679,13 +599,13 @@ func (p *redisPrompt) applyTab() {
 	} else {
 		p.cycling = true
 	}
-	p.input = []rune(p.sugg[p.sel].Command + " ")
+	p.input.Set(p.sugg[p.sel].Command + " ")
 }
 
 // startRun executes the current input asynchronously. A second run while one
 // is in flight is ignored.
 func (p *redisPrompt) startRun() tea.Cmd {
-	fields := strings.Fields(string(p.input))
+	fields := strings.Fields(p.input.String())
 	if p.running || len(fields) == 0 {
 		return nil
 	}
@@ -729,23 +649,18 @@ func (p *redisPrompt) Update(msg tea.Msg) (ui.Overlay, tea.Cmd) {
 			}
 			return p, nil
 		case "backspace":
-			if n := len(p.input); n > 0 {
-				p.input = p.input[:n-1]
-			}
+			p.input.Backspace()
 			p.recompute()
 			return p, nil
 		case "ctrl+u":
-			p.input = nil
+			p.input.Clear()
 			p.recompute()
 			return p, nil
 		}
 		if t := m.Text; t != "" {
-			for _, r := range t {
-				if r >= ' ' && r != 0x7f {
-					p.input = append(p.input, r)
-				}
+			if p.input.InsertKey(t) {
+				p.recompute()
 			}
-			p.recompute()
 		}
 		return p, nil
 	}
@@ -763,7 +678,7 @@ func (p *redisPrompt) View(width, height int, th *theme.Theme) string {
 	inner := boxW - 2
 
 	// Input line with the tail kept visible while typing long commands.
-	val := string(p.input)
+	val := p.input.String()
 	room := inner - 4
 	if room < 1 {
 		room = 1
@@ -782,7 +697,7 @@ func (p *redisPrompt) View(width, height int, th *theme.Theme) string {
 		name := " " + h.Command
 		if i == p.sel {
 			line := name + detail
-			lines = append(lines, th.ListSelected.Render(browserPad(line, inner)))
+			lines = append(lines, th.ListSelected.Render(ui.Pad(line, inner)))
 		} else {
 			row := th.ListItem.Render(name) + th.Subtle.Render(detail)
 			lines = append(lines, ansi.Truncate(row, inner, "…"))

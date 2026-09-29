@@ -65,7 +65,7 @@ func (b *Backend) Run(stmt string) (db.Result, error) {
 	case SELECT, WITH, SHOW, EXPLAIN, VALUES, TABLE:
 		isDQL = true
 	default:
-		isDQL = hasReturningClause(words)
+		isDQL = db.HasReturningClause(words)
 	}
 
 	if isDQL {
@@ -111,7 +111,7 @@ func (b *Backend) Tables(namespace string) ([]string, error) {
 // FetchTable loads up to limit rows of namespace.table.
 func (b *Backend) FetchTable(namespace, table string, limit int) (*data.Frame, error) {
 	query := fmt.Sprintf("SELECT * FROM %s.%s LIMIT %d",
-		quoteIdentifier(namespace), quoteIdentifier(table), limit)
+		db.QuoteIdentDouble(namespace), db.QuoteIdentDouble(table), limit)
 	fields, records, err := b.db.RawQuery(query)
 	if err != nil {
 		return nil, err

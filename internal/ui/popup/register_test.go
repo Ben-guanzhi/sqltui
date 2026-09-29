@@ -45,18 +45,18 @@ func TestRegisterTyping(t *testing.T) {
 	for _, s := range []string{"m", "y", "t", "a", "b"} {
 		p.registerKey(s, s)
 	}
-	if string(p.input) != "mytab" {
-		t.Fatalf("input = %q, want mytab", string(p.input))
+	if p.input.String() != "mytab" {
+		t.Fatalf("input = %q, want mytab", p.input.String())
 	}
 	p.registerKey("backspace", "")
 	p.registerKey("home", "")
 	p.registerKey("X", "X")
-	if string(p.input) != "Xmyta" {
-		t.Fatalf("input = %q, want Xmyta", string(p.input))
+	if p.input.String() != "Xmyta" {
+		t.Fatalf("input = %q, want Xmyta", p.input.String())
 	}
 	p.registerKey("ctrl+u", "")
-	if string(p.input) != "myta" || p.cursor != 0 {
-		t.Fatalf("after ctrl+u: input=%q cursor=%d", string(p.input), p.cursor)
+	if p.input.String() != "myta" || p.input.Cursor() != 0 {
+		t.Fatalf("after ctrl+u: input=%q cursor=%d", p.input.String(), p.input.Cursor())
 	}
 }
 
@@ -70,14 +70,14 @@ func TestRegisterEnterInvalidStaysOpen(t *testing.T) {
 		t.Fatal("expected inline error message")
 	}
 
-	p = &registerPrompt{input: []rune("_"), cursor: 1}
+	p = &registerPrompt{input: ui.NewLineInput("_")}
 	if _, close := p.registerKey("enter", ""); close {
 		t.Fatal(`enter on "_" must stay open`)
 	}
 }
 
 func TestRegisterEnterValid(t *testing.T) {
-	p := &registerPrompt{input: []rune("  people  "), cursor: 10}
+	p := &registerPrompt{input: ui.NewLineInput("  people  ")}
 	cmd, close := p.registerKey("enter", "")
 	if !close {
 		t.Fatal("valid enter must close")
@@ -96,7 +96,7 @@ func TestRegisterEnterValid(t *testing.T) {
 }
 
 func TestRegisterUpdateEmitsToastAndClose(t *testing.T) {
-	p := &registerPrompt{input: []rune("people"), cursor: 6}
+	p := &registerPrompt{input: ui.NewLineInput("people")}
 	_, cmd := p.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	msgs := registerCollect(cmd)
 
@@ -125,24 +125,24 @@ func TestRegisterPaste(t *testing.T) {
 	if ov != ui.Overlay(p) || cmd != nil {
 		t.Fatal("paste replaced the overlay or produced a command")
 	}
-	if got := string(p.input); got != "my table" {
+	if got := p.input.String(); got != "my table" {
 		t.Fatalf("input = %q, want %q", got, "my table")
 	}
-	if p.cursor != len([]rune("my table")) || p.errMsg != "" {
-		t.Fatalf("cursor=%d errMsg=%q", p.cursor, p.errMsg)
+	if p.input.Cursor() != len([]rune("my table")) || p.errMsg != "" {
+		t.Fatalf("cursor=%d errMsg=%q", p.input.Cursor(), p.errMsg)
 	}
 
 	// Paste inserts at the cursor.
 	p.registerKey("home", "")
 	p.Update(tea.PasteMsg{Content: "x_"})
-	if got := string(p.input); got != "x_my table" {
+	if got := p.input.String(); got != "x_my table" {
 		t.Fatalf("cursor paste: %q", got)
 	}
 
 	// Control-only paste is a no-op and keeps the error message.
 	p.errMsg = "kept"
 	p.Update(tea.PasteMsg{Content: "\r"})
-	if string(p.input) != "x_my table" || p.errMsg != "kept" {
-		t.Fatalf("empty paste changed state: %q err=%q", string(p.input), p.errMsg)
+	if p.input.String() != "x_my table" || p.errMsg != "kept" {
+		t.Fatalf("empty paste changed state: %q err=%q", p.input.String(), p.errMsg)
 	}
 }

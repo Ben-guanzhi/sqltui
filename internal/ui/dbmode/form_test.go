@@ -89,21 +89,21 @@ func TestConnFormNavigationAndEditing(t *testing.T) {
 	// printable keys edit the focused field, backspace deletes.
 	f.focus = 1
 	typeText(t, f, "abc")
-	if got := string(f.fields[1].value); got != "abc" {
+	if got := f.fields[1].input.String(); got != "abc" {
 		t.Fatalf("typed value = %q, want abc", got)
 	}
 	f.Update(keyPress("backspace"))
-	if got := string(f.fields[1].value); got != "ab" {
+	if got := f.fields[1].input.String(); got != "ab" {
 		t.Fatalf("after backspace = %q, want ab", got)
 	}
 	// ctrl+u clears the focused field.
 	f.Update(tea.KeyPressMsg{Code: 'u', Mod: tea.ModCtrl})
-	if got := string(f.fields[1].value); got != "" {
+	if got := f.fields[1].input.String(); got != "" {
 		t.Fatalf("after ctrl+u = %q, want empty", got)
 	}
 
 	// password field renders masked.
-	f.fields[1].value = []rune("hunter2")
+	f.fields[1].input = ui.NewLineInput("hunter2")
 	view := f.View(80, 24, testTheme())
 	if strings.Contains(view, "hunter2") {
 		t.Fatal("password rendered in clear text")
@@ -152,18 +152,18 @@ func TestConnFormPasteIntoFocusedField(t *testing.T) {
 	if cmd != nil {
 		t.Fatal("paste must not emit commands")
 	}
-	if got := string(f.fields[2].value); got != "db-1.internaldb-2.internal" {
+	if got := f.fields[2].input.String(); got != "db-1.internaldb-2.internal" {
 		t.Fatalf("pasted value = %q, want newlines stripped", got)
 	}
 
 	// Paste appends to what is already typed, into the focused field only.
 	f.Update(tea.PasteMsg{Content: ":3306"})
-	if got := string(f.fields[2].value); got != "db-1.internaldb-2.internal:3306" {
+	if got := f.fields[2].input.String(); got != "db-1.internaldb-2.internal:3306" {
 		t.Fatalf("second paste = %q, want appended", got)
 	}
 	for i := range f.fields {
-		if i != 2 && len(f.fields[i].value) != 0 {
-			t.Fatalf("paste leaked into field %d (%q)", i, string(f.fields[i].value))
+		if i != 2 && f.fields[i].input.Len() != 0 {
+			t.Fatalf("paste leaked into field %d (%q)", i, f.fields[i].input.String())
 		}
 	}
 }
@@ -173,7 +173,7 @@ func TestConnFormSaveConfig(t *testing.T) {
 	f := newConnForm(nil, KindMysql)
 	for i := range f.fields {
 		if f.fields[i].key == fkHost {
-			f.fields[i].value = []rune("db.example.internal")
+			f.fields[i].input = ui.NewLineInput("db.example.internal")
 		}
 	}
 
@@ -259,7 +259,7 @@ func TestConnFormConnectSuccess(t *testing.T) {
 	f := newConnForm(nil, KindMysql)
 	for i := range f.fields {
 		if f.fields[i].key == fkHost {
-			f.fields[i].value = []rune("db.internal")
+			f.fields[i].input = ui.NewLineInput("db.internal")
 		}
 	}
 
@@ -379,9 +379,9 @@ func TestConnFormPasswordKeepsWhitespace(t *testing.T) {
 	for i := range f.fields {
 		switch f.fields[i].key {
 		case fkPassword:
-			f.fields[i].value = []rune("  p@ss ")
+			f.fields[i].input = ui.NewLineInput("  p@ss ")
 		case fkUser:
-			f.fields[i].value = []rune("  alice ")
+			f.fields[i].input = ui.NewLineInput("  alice ")
 		}
 	}
 	v := f.values()

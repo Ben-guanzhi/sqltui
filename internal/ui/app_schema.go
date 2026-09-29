@@ -207,7 +207,7 @@ func (a *App) cursorFieldMeta() (dataType, notNull, defaultVal, comment string) 
 	// via the matched set so the type/metadata matches the field under the
 	// cursor.
 	field := clamp(p.SheetField, 0, f.NumCols()-1)
-	if matched := sheetMatchedCols(f, string(p.SheetFilter)); len(matched) > 0 {
+	if matched := sheetMatchedCols(f, p.SheetFilter.String()); len(matched) > 0 {
 		idx := clamp(p.SheetField, 0, len(matched)-1)
 		field = matched[idx]
 	}

@@ -100,7 +100,7 @@ func (b *Backend) Run(stmt string) (db.Result, error) {
 		case strings.HasPrefix(words[0], "("):
 			isDQL = true
 		default:
-			isDQL = hasReturningClause(words)
+			isDQL = db.HasReturningClause(words)
 		}
 	}
 
@@ -152,9 +152,9 @@ func (b *Backend) FetchTable(namespace, table string, limit int) (*data.Frame, e
 	} else if limit > 10000 {
 		limit = 10000
 	}
-	ident := quoteIdent(table)
+	ident := db.QuoteIdentBracket(table)
 	if namespace != "" {
-		ident = quoteIdent(namespace) + ".dbo." + ident
+		ident = db.QuoteIdentBracket(namespace) + ".dbo." + ident
 	}
 	query := fmt.Sprintf("SELECT TOP %d * FROM %s", limit, ident)
 	return b.queryFrame(query)

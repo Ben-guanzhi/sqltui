@@ -210,7 +210,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case SetTimeRangeMsg:
 		// Set time range on OpenObserve backend and trigger refresh
 		if a.backend != nil {
-			if oobe, ok := a.backend.(interface{ SetTimeRange(int) }); ok {
+			if oobe, ok := a.backend.(db.TimeRanger); ok {
 				oobe.SetTimeRange(m.Minutes)
 				return a, tea.Batch(
 					a.runCommand("refreshtable", ""),
@@ -223,7 +223,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case SetPageMsg:
 		// Set page on OpenObserve backend and trigger refresh
 		if a.backend != nil {
-			if oobe, ok := a.backend.(interface{ SetPage(int) }); ok {
+			if oobe, ok := a.backend.(db.Paged); ok {
 				oobe.SetPage(m.Page)
 				return a, a.runCommand("refreshtable", "")
 			}
@@ -253,13 +253,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case SetQueryParamsMsg:
 		if a.backend != nil {
-			type oobeQuerySetter interface {
-				GetTimeRange() int
-				SetTimeRange(int)
-				SetPage(int)
-				SetPageSize(int)
-			}
-			if oo, ok := a.backend.(oobeQuerySetter); ok {
+			if oo, ok := a.backend.(db.QueryParamsSetter); ok {
 				needsReset := m.Minutes != oo.GetTimeRange()
 				oo.SetTimeRange(m.Minutes)
 				page := m.Page
@@ -269,7 +263,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				oo.SetPage(page)
 				oo.SetPageSize(m.PageSize)
 				if needsReset {
-					if tw, ok2 := a.backend.(interface{ ResetTimeWindow() }); ok2 {
+					if tw, ok2 := a.backend.(db.TimeWindowResetter); ok2 {
 						tw.ResetTimeWindow()
 					}
 				}
@@ -451,20 +445,20 @@ func (a *App) renderBody(w, h int) string {
 	if p.Mode == ModeSheet && frame != nil && frame.NumRows() > 0 {
 		if p.SheetEditing {
 			keyW, valW := sheetTableGeometry(frame, w)
-			matched := sheetMatchedCols(frame, string(p.SheetFilter))
+			matched := sheetMatchedCols(frame, p.SheetFilter.String())
 			actualCol := p.SheetField
 			if len(matched) > 0 {
 				actualCol = matched[clamp(p.SheetField, 0, len(matched)-1)]
 			}
 			leftContent := renderSheetKeyPanel(frame, p.Table.Sel(), p.SheetOff, keyW, h, p.SheetField,
-				string(p.SheetFilter), p.SheetFiltering, a.th)
+				p.SheetFilter.String(), p.SheetFiltering, a.th)
 			rightContent := renderSheetDrawer(frame, p.Table.Sel(), actualCol,
-				p.SheetEdit, p.SheetEditCur, p.SheetValOff, valW, h, a.cursorFieldType(), a.th)
+				[]rune(p.SheetEdit.String()), p.SheetEdit.Cursor(), p.SheetValOff, valW, h, a.cursorFieldType(), a.th)
 			return joinDrawerSplit(leftContent, rightContent, keyW, valW, h, a.th)
 		}
 		return renderSheet(frame, p.Table.Sel(), p.SheetOff, w, h, p.SheetField,
 			false, nil, 0, p.SheetValOff,
-			string(p.SheetFilter), p.SheetFiltering, a.th)
+			p.SheetFilter.String(), p.SheetFiltering, a.th)
 	}
 
 	return p.Table.Render(frame, RenderOpts{
@@ -473,8 +467,6 @@ func (a *App) renderBody(w, h int) string {
 		Theme:          a.th,
 		ShowBorders:    a.showBorders,
 		ShowRowNumbers: a.showRowNumbers,
-		SortCol:        p.SortCol,
-		SortAsc:        p.SortAsc,
 		HeaderCur:      p.Table.ColCursor(),
 		SeverityCol:    a.severityColName(),
 		TableCols:      p.TableCols,
@@ -511,12 +503,7 @@ func (a *App) renderBottom(w int) string {
 	case a.backend != nil:
 		info.Conn = a.backend.Title()
 		// Populate OpenObserve-specific status info via type assertion.
-		type oobeInfo interface {
-			GetTimeRange() int
-			GetPage() int
-			GetPageSize() int
-		}
-		if oobe, ok := a.backend.(oobeInfo); ok {
+		if oobe, ok := a.backend.(db.QueryParamsSetter); ok {
 			info.TimeRange = formatTimeRange(oobe.GetTimeRange())
 			info.Page = oobe.GetPage() + 1
 			info.PageSize = oobe.GetPageSize()
@@ -588,7 +575,7 @@ func (a *App) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// space/p opens unified query-params popup for OpenObserve backends
 	if p != nil && p.Mode == ModeTable && (key == "space" || key == "p") {
 		if a.backend != nil {
-			if _, ok := a.backend.(interface{ GetTimeRange() int }); ok {
+			if _, ok := a.backend.(db.TimeRanger); ok {
 				return a, a.runCommand("queryparams", "")
 			}
 		}
@@ -633,7 +620,7 @@ func (a *App) handleSheetFilterKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch key {
 	case "esc", "ctrl+c":
 		p.SheetFiltering = false
-		p.SheetFilter = nil
+		p.SheetFilter = LineInput{}
 		p.SheetField = 0
 		p.SheetOff = 0
 		return a, nil
@@ -644,15 +631,13 @@ func (a *App) handleSheetFilterKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		a.clampSheetToMatched(f, p)
 		return a, nil
 	case "backspace", "ctrl+h":
-		if len(p.SheetFilter) > 0 {
-			p.SheetFilter = p.SheetFilter[:len(p.SheetFilter)-1]
-		}
+		p.SheetFilter.Backspace()
 		p.SheetField = 0
 		p.SheetOff = 0
 		a.clampSheetToMatched(f, p)
 		return a, nil
 	case "ctrl+u":
-		p.SheetFilter = nil
+		p.SheetFilter.Clear()
 		p.SheetField = 0
 		p.SheetOff = 0
 		return a, nil
@@ -664,7 +649,7 @@ func (a *App) handleSheetFilterKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		a.edgeFollowSheet(f, p)
 		return a, nil
 	case "down", "j":
-		matched := sheetMatchedCols(f, string(p.SheetFilter))
+		matched := sheetMatchedCols(f, p.SheetFilter.String())
 		if len(matched) > 0 && p.SheetField < len(matched)-1 {
 			p.SheetField++
 		}
@@ -673,7 +658,7 @@ func (a *App) handleSheetFilterKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return a, nil
 	default:
 		if t := msg.Key().Text; t != "" && msg.Mod == 0 {
-			p.SheetFilter = append(p.SheetFilter, []rune(t)...)
+			p.SheetFilter.InsertKey(t)
 			p.SheetField = 0
 			p.SheetOff = 0
 			a.clampSheetToMatched(f, p)
@@ -686,7 +671,7 @@ func (a *App) handleSheetFilterKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 // matched set and re-runs the left-list edge-follow. Called after every
 // filter mutation that can shrink the matched set.
 func (a *App) clampSheetToMatched(f *data.Frame, p *Pane) {
-	matched := sheetMatchedCols(f, string(p.SheetFilter))
+	matched := sheetMatchedCols(f, p.SheetFilter.String())
 	if len(matched) == 0 {
 		p.SheetField = 0
 		p.SheetOff = 0
@@ -704,7 +689,7 @@ func (a *App) clampSheetToMatched(f *data.Frame, p *Pane) {
 // edgeFollowSheet advances SheetOff so the cursored entry stays visible in
 // the sheet body, mirroring renderSheet's geometry exactly.
 func (a *App) edgeFollowSheet(f *data.Frame, p *Pane) {
-	matched := sheetMatchedCols(f, string(p.SheetFilter))
+	matched := sheetMatchedCols(f, p.SheetFilter.String())
 	if len(matched) == 0 {
 		p.SheetOff = 0
 		return
@@ -714,7 +699,7 @@ func (a *App) edgeFollowSheet(f *data.Frame, p *Pane) {
 	// Mirror renderSheet's header accounting: row header + col header + footer
 	// hint = 3. Add 1 more when the filter line is visible.
 	headers := 3
-	if p.SheetFiltering || strings.TrimSpace(string(p.SheetFilter)) != "" {
+	if p.SheetFiltering || strings.TrimSpace(p.SheetFilter.String()) != "" {
 		headers = 4
 	}
 	visible := bodyH - headers
@@ -756,8 +741,7 @@ func (a *App) handleSheetEditKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch key {
 	case "esc", "ctrl+c":
 		p.SheetEditing = false
-		p.SheetEdit = nil
-		p.SheetEditCur = 0
+		p.SheetEdit = LineInput{}
 		return a, nil
 	case "ctrl+s":
 		if p.SheetField < 0 || p.SheetField >= f.NumCols() {
@@ -769,55 +753,28 @@ func (a *App) handleSheetEditKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			Col:       p.SheetField,
 			ColName:   f.Columns[p.SheetField].Name,
 			OldValue:  f.CellString(p.Table.Sel(), p.SheetField),
-			NewValue:  string(p.SheetEdit),
+			NewValue:  p.SheetEdit.String(),
 			Table:     a.BaseCrumb(),
 			Namespace: a.CurrentTableNamespace(),
 		}
 		return a, a.runCommand("confirmsave", "")
-	case "backspace", "ctrl+h":
-		if p.SheetEditCur > 0 {
-			p.SheetEdit = append(p.SheetEdit[:p.SheetEditCur-1], p.SheetEdit[p.SheetEditCur:]...)
-			p.SheetEditCur--
-		}
-	case "delete":
-		if p.SheetEditCur < len(p.SheetEdit) {
-			p.SheetEdit = append(p.SheetEdit[:p.SheetEditCur], p.SheetEdit[p.SheetEditCur+1:]...)
-		}
-	case "left":
-		if p.SheetEditCur > 0 {
-			p.SheetEditCur--
-		}
-	case "right":
-		if p.SheetEditCur < len(p.SheetEdit) {
-			p.SheetEditCur++
-		}
-	case "home", "ctrl+a":
-		p.SheetEditCur = 0
-	case "end", "ctrl+e":
-		p.SheetEditCur = len(p.SheetEdit)
-	case "ctrl+u":
-		p.SheetEdit = p.SheetEdit[p.SheetEditCur:]
-		p.SheetEditCur = 0
 	default:
-		// Printable rune insert at the cursor. Modifier combos (ctrl+x) are
-		// ignored so they never land as literal text.
-		if t := msg.Key().Text; t != "" && msg.Mod == 0 {
-			r := []rune(t)
-			p.SheetEdit = append(p.SheetEdit[:p.SheetEditCur], append(r, p.SheetEdit[p.SheetEditCur:]...)...)
-			p.SheetEditCur += len(r)
-		}
+		// The shared line-input machine covers backspace/delete/cursor moves/
+		// ctrl+u and unmodified printable inserts; every other key is
+		// swallowed so the field does not move.
+		p.SheetEdit.Handle(msg)
 	}
 	// Re-clamp the right-pane value scroll to the edit buffer length.
 	_, valW := sheetTableGeometry(f, a.width)
 	// drawer header: fieldname(type) + separator + hint = 3 lines
 	visible := max(1, max(1, a.height-1)-3)
 	count := sheetValueLineCount(f, p.Table.Sel(), p.SheetField, valW)
-	if editing := len(p.SheetEdit); editing > 0 {
-		count = strings.Count(ansi.Wrap(string(p.SheetEdit), valW, ""), "\n") + 1
+	if editing := p.SheetEdit.Len(); editing > 0 {
+		count = strings.Count(ansi.Wrap(p.SheetEdit.String(), valW, ""), "\n") + 1
 	}
 	maxOff := max(0, count-visible)
 	// Keep the cursor line in view while typing.
-	curLine, _ := sheetEditLineOf(p.SheetEdit, p.SheetEditCur, valW)
+	curLine, _ := sheetEditLineOf([]rune(p.SheetEdit.String()), p.SheetEdit.Cursor(), valW)
 	if curLine < p.SheetValOff {
 		p.SheetValOff = curLine
 	} else if curLine >= p.SheetValOff+visible {
@@ -938,14 +895,13 @@ func (a *App) dispatch(action, key string) tea.Cmd {
 			return nil
 		}
 		val := f.CellString(p.Table.Sel(), p.SheetField)
-		p.SheetEdit = []rune(val)
-		p.SheetEditCur = len(p.SheetEdit)
+		p.SheetEdit = NewLineInput(val)
 		p.SheetEditing = true
 		p.SheetValOff = 0
 		return nil
 	case ActRefresh:
 		if a.backend != nil {
-			if tw, ok := a.backend.(interface{ ResetTimeWindow() }); ok {
+			if tw, ok := a.backend.(db.TimeWindowResetter); ok {
 				tw.ResetTimeWindow()
 			}
 			return a.runCommand("refreshtable", "")
@@ -969,10 +925,7 @@ func (a *App) dispatch(action, key string) tea.Cmd {
 		return a.startDelete()
 	case ActNextPage:
 		if a.backend != nil {
-			if oobe, ok := a.backend.(interface {
-				GetPage() int
-				SetPage(int)
-			}); ok {
+			if oobe, ok := a.backend.(db.Paged); ok {
 				oobe.SetPage(oobe.GetPage() + 1)
 				return a.runCommand("refreshtable", "")
 			}
@@ -980,10 +933,7 @@ func (a *App) dispatch(action, key string) tea.Cmd {
 		return nil
 	case ActPrevPage:
 		if a.backend != nil {
-			if oobe, ok := a.backend.(interface {
-				GetPage() int
-				SetPage(int)
-			}); ok {
+			if oobe, ok := a.backend.(db.Paged); ok {
 				if oobe.GetPage() > 0 {
 					oobe.SetPage(oobe.GetPage() - 1)
 					return a.runCommand("refreshtable", "")
@@ -1037,9 +987,8 @@ func (a *App) dispatch(action, key string) tea.Cmd {
 			p.SheetField = 0
 			p.SheetValOff = 0
 			p.SheetEditing = false
-			p.SheetEdit = nil
-			p.SheetEditCur = 0
-			p.SheetFilter = nil
+			p.SheetEdit = LineInput{}
+			p.SheetFilter = LineInput{}
 			p.SheetFiltering = false
 			// Warm the column-metadata cache for this table so the sheet shows
 			// the real engine type (e.g. "varchar(255)") instead of the frame
@@ -1053,13 +1002,13 @@ func (a *App) dispatch(action, key string) tea.Cmd {
 		// "/" enters filter input with a fresh buffer. While already filtering
 		// this is never reached: handleKey routes to handleSheetFilterKey
 		// before dispatch, so a literal "/" lands as a printable rune.
-		p.SheetFilter = nil
+		p.SheetFilter = LineInput{}
 		p.SheetFiltering = true
 		return nil
 	case ActBack:
 		p.Mode = ModeTable
 	case ActSheetDown, ActSheetUp:
-		matched := sheetMatchedCols(f, string(p.SheetFilter))
+		matched := sheetMatchedCols(f, p.SheetFilter.String())
 		if len(matched) == 0 {
 			return nil
 		}
@@ -1073,8 +1022,7 @@ func (a *App) dispatch(action, key string) tea.Cmd {
 		p.SheetValOff = 0
 		if p.SheetEditing {
 			p.SheetEditing = false
-			p.SheetEdit = nil
-			p.SheetEditCur = 0
+			p.SheetEdit = LineInput{}
 		}
 		a.edgeFollowSheet(f, p)
 	case ActCopy:
@@ -1521,7 +1469,7 @@ func (a *App) CurrentTableNamespace() string {
 			return ns
 		}
 	}
-	if cn, ok := a.backend.(interface{ CurrentNamespace() string }); ok {
+	if cn, ok := a.backend.(db.Namespaced); ok {
 		return cn.CurrentNamespace()
 	}
 	return ""

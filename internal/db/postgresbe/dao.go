@@ -86,17 +86,6 @@ func NewDB(dsn string, dbName string) (*DB, error) {
 	return DbClient, nil
 }
 
-func GetDB() *DB {
-	return DbClient
-}
-
-func GetDbName() string {
-	if DbClient == nil {
-		return ""
-	}
-	return DbClient.dbName
-}
-
 type RawCommandResult struct {
 	Fields  []string
 	Records [][]string
@@ -114,7 +103,7 @@ func (db *DB) RawSqlCommand(query string) (rawCmdResult RawCommandResult, err er
 	case SELECT, WITH, SHOW, EXPLAIN, VALUES, TABLE:
 		rawCmdResult.IsDQL = true
 	default:
-		rawCmdResult.IsDQL = hasReturningClause(words)
+		rawCmdResult.IsDQL = dbapi.HasReturningClause(words)
 	}
 
 	if rawCmdResult.IsDQL {
@@ -123,17 +112,6 @@ func (db *DB) RawSqlCommand(query string) (rawCmdResult RawCommandResult, err er
 	}
 	rawCmdResult.Result, err = db.RawExec(query)
 	return rawCmdResult, err
-}
-
-// hasReturningClause reports whether the statement contains a RETURNING
-// clause, whose result set would be silently discarded by db.Exec.
-func hasReturningClause(words []string) bool {
-	for _, word := range words[1:] {
-		if strings.EqualFold(word, "returning") {
-			return true
-		}
-	}
-	return false
 }
 
 func (db *DB) RawQuery(query string) (fields []string, records [][]string, err error) {
@@ -207,7 +185,7 @@ func (db *DB) ListTables(schema string) ([]string, error) {
 
 func (db *DB) FetchTableRecords(schema, table string) (fields []string, records [][]string, err error) {
 	query := fmt.Sprintf("SELECT * FROM %s.%s LIMIT %d",
-		quoteIdentifier(schema), quoteIdentifier(table), FetchLimit)
+		dbapi.QuoteIdentDouble(schema), dbapi.QuoteIdentDouble(table), FetchLimit)
 	return db.RawQuery(query)
 }
 
@@ -217,7 +195,7 @@ func (db *DB) ListPrimaryKeys(schema, table string) ([]string, error) {
 	if db.conn == nil {
 		return nil, fmt.Errorf("postgres connection is not open")
 	}
-	regclass := quoteIdentifier(schema) + "." + quoteIdentifier(table)
+	regclass := dbapi.QuoteIdentDouble(schema) + "." + dbapi.QuoteIdentDouble(table)
 	query := `SELECT a.attname FROM pg_index i
 		JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
 		WHERE i.indisprimary AND i.indrelid = $1::regclass
@@ -248,7 +226,7 @@ func (db *DB) ColumnsMeta(schema, table string) ([]dbapi.ColumnMeta, error) {
 	if db.conn == nil {
 		return nil, fmt.Errorf("postgres connection is not open")
 	}
-	regclass := quoteIdentifier(schema) + "." + quoteIdentifier(table)
+	regclass := dbapi.QuoteIdentDouble(schema) + "." + dbapi.QuoteIdentDouble(table)
 	query := `SELECT c.column_name, c.data_type, c.is_nullable, c.column_default,
 		col_description($1::regclass, c.ordinal_position)
 		FROM information_schema.columns c
@@ -314,27 +292,11 @@ func (db *DB) ColumnIndexTypes(schema, table string) (map[string]string, error) 
 		if err := rows.Scan(&colName, &label); err != nil {
 			return nil, err
 		}
-		if existing, ok := result[colName]; !ok || indexPriority(existing) < indexPriority(label) {
+		if existing, ok := result[colName]; !ok || dbapi.IndexPriority(existing) < dbapi.IndexPriority(label) {
 			result[colName] = label
 		}
 	}
 	return result, rows.Err()
-}
-
-func indexPriority(label string) int {
-	switch label {
-	case "PK":
-		return 3
-	case "UNIQUE":
-		return 2
-	case "INDEX":
-		return 1
-	}
-	return 0
-}
-
-func quoteIdentifier(name string) string {
-	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
 }
 
 func readRecords(rows pgx.Rows) (fields []string, records [][]string, err error) {

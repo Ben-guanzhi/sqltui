@@ -3,6 +3,9 @@ package mysqlbe
 import (
 	"strings"
 	"testing"
+
+	"github.com/LinPr/sqltui/internal/db"
+	"github.com/go-sql-driver/mysql"
 )
 
 func TestConfigDsn(t *testing.T) {
@@ -19,7 +22,7 @@ func TestConfigDsn(t *testing.T) {
 		{
 			name: "empty password",
 			cfg:  Config{UserName: "u", Password: "", Host: "db.local", Port: "3307", DbName: "d"},
-			want: "u:@tcp(db.local:3307)/d?charset=utf8&parseTime=true",
+			want: "u@tcp(db.local:3307)/d?charset=utf8&parseTime=true",
 		},
 	}
 	for _, tt := range tests {
@@ -28,6 +31,37 @@ func TestConfigDsn(t *testing.T) {
 				t.Fatalf("Dsn() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+// TestConfigDsnRoundTrip pins the property that matters: the DSN must be
+// parseable by the driver with every field intact. Regression guard for the
+// old fmt.Sprintf concatenation, which broke on passwords containing
+// @ : / ( ) and let a '?' in the db name inject DSN params.
+func TestConfigDsnRoundTrip(t *testing.T) {
+	cases := []Config{
+		{UserName: "root", Password: "secret", Host: "127.0.0.1", Port: "3306", DbName: "shop"},
+		{UserName: "u@ser", Password: "p@ss:wo/rd(1)", Host: "db.local", Port: "3307", DbName: "d?loc=1"},
+		{UserName: "u", Password: `p\ss`, Host: "[::1]", Port: "3307", DbName: "d"},
+	}
+	for _, c := range cases {
+		got, err := mysql.ParseDSN(c.Dsn())
+		if err != nil {
+			t.Fatalf("ParseDSN(%q): %v", c.Dsn(), err)
+		}
+		if got.User != c.UserName || got.Passwd != c.Password {
+			t.Errorf("credentials round-trip: user = %q passwd = %q, want %q / %q", got.User, got.Passwd, c.UserName, c.Password)
+		}
+		if got.Addr != c.Host+":"+c.Port {
+			t.Errorf("addr round-trip: %q, want %q", got.Addr, c.Host+":"+c.Port)
+		}
+		if got.DBName != c.DbName {
+			t.Errorf("dbname round-trip: %q, want %q", got.DBName, c.DbName)
+		}
+		// '?' in the db name must be encoded, not injected as a DSN param.
+		if _, injected := got.Params["loc"]; injected {
+			t.Errorf("dbname %q injected DSN params", c.DbName)
+		}
 	}
 }
 
@@ -49,8 +83,8 @@ func TestQuoteIdent(t *testing.T) {
 		{"odd`name", "`odd``name`"},
 	}
 	for _, tt := range tests {
-		if got := quoteIdent(tt.in); got != tt.want {
-			t.Errorf("quoteIdent(%q) = %q, want %q", tt.in, got, tt.want)
+		if got := db.QuoteIdentBacktick(tt.in); got != tt.want {
+			t.Errorf("QuoteIdentBacktick(%q) = %q, want %q", tt.in, got, tt.want)
 		}
 	}
 }
@@ -67,8 +101,8 @@ func TestHasReturningClause(t *testing.T) {
 	}
 	for _, tt := range tests {
 		words := strings.Fields(tt.stmt)
-		if got := hasReturningClause(words); got != tt.want {
-			t.Errorf("hasReturningClause(%q) = %v, want %v", tt.stmt, got, tt.want)
+		if got := db.HasReturningClause(words); got != tt.want {
+			t.Errorf("HasReturningClause(%q) = %v, want %v", tt.stmt, got, tt.want)
 		}
 	}
 }

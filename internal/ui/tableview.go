@@ -48,8 +48,6 @@ type RenderOpts struct {
 	ShowRowNumbers bool
 	MatchRows      map[int]bool // rows emphasized with the match style
 
-	SortCol    string // currently sorted column name ("" = unsorted)
-	SortAsc    bool   // true = ASC indicator, false = DESC indicator
 	HeaderCur  int    // column index to highlight in header (-1 or 0+ valid)
 	// SeverityCol, when non-empty, names a column whose value determines the row foreground color.
 	// Values matching TRACE/DEBUG/INFO/WARN/ERROR/FATAL (case-insensitive) get distinct colors.
@@ -353,14 +351,6 @@ func (tv *TableView) Render(f *data.Frame, o RenderOpts) string {
 			hb.WriteString(th.Header.Render(" "))
 		}
 		name := f.Columns[c].Name
-		// Append a sort-direction indicator when this column is the sort key.
-		if o.SortCol == name {
-			if o.SortAsc {
-				name += "↑"
-			} else {
-				name += "↓"
-			}
-		}
 		cell := padCell(name, widths[i])
 		// Highlight the cursor column with a soft warm tint; other columns use plain header style.
 		if c == o.HeaderCur {

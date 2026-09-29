@@ -66,7 +66,7 @@ type importer struct {
 	step int
 
 	// step 1: path input + tab completion
-	path     importerInput
+	path     ui.LineInput
 	matches  []string
 	matchIdx int
 
@@ -79,7 +79,7 @@ type importer struct {
 	// step 3: options
 	optFocus int // index into visible option rows
 	noHeader bool
-	sep      importerInput
+	sep      ui.LineInput
 	inferIdx int
 
 	loading bool
@@ -91,8 +91,8 @@ func newImporter(arg string) *importer {
 		formats:  append([]string{importerAuto}, reader.SupportedFormats()...),
 		inferIdx: importerIndexOf(importerInferModes, reader.DefaultOptions().InferSchema),
 	}
-	o.path.set(strings.TrimSpace(arg))
-	o.sep.set(",")
+	o.path.Set(strings.TrimSpace(arg))
+	o.sep.Set(",")
 	return o
 }
 
@@ -132,12 +132,12 @@ func (o *importer) handlePaste(content string) {
 	}
 	switch o.step {
 	case importerStepPath:
-		if o.path.paste(content) {
+		if o.path.Paste(content) {
 			o.matches = nil // any edit invalidates the completion cycle
 			o.errline = ""
 		}
 	case importerStepOptions:
-		if o.optionRows()[o.optFocus] == importerOptSep && o.sep.paste(strings.TrimSpace(pasteSanitize(content))) {
+		if o.optionRows()[o.optFocus] == importerOptSep && o.sep.Paste(strings.TrimSpace(ui.SanitizePaste(content))) {
 			o.errline = ""
 		}
 	}
@@ -191,8 +191,8 @@ func (o *importer) keyPath(msg tea.KeyPressMsg) (ui.Overlay, tea.Cmd) {
 	case "esc":
 		return o, ui.CloseOverlay
 	case "left":
-		if o.path.cursor > 0 {
-			o.path.key(msg)
+		if o.path.Cursor() > 0 {
+			o.path.Handle(msg)
 			return o, nil
 		}
 		return o, ui.CloseOverlay // back from step 1 closes
@@ -200,7 +200,7 @@ func (o *importer) keyPath(msg tea.KeyPressMsg) (ui.Overlay, tea.Cmd) {
 		o.cycleCompletion()
 		return o, nil
 	case "enter":
-		if strings.TrimSpace(o.path.text) == "" {
+		if strings.TrimSpace(o.path.String()) == "" {
 			o.errline = "enter a file path or URL"
 			return o, nil
 		}
@@ -209,7 +209,7 @@ func (o *importer) keyPath(msg tea.KeyPressMsg) (ui.Overlay, tea.Cmd) {
 		o.step = importerStepFormat
 		return o, nil
 	}
-	if o.path.key(msg) {
+	if _, handled := o.path.Handle(msg); handled {
 		o.matches = nil // any edit invalidates the completion cycle
 		o.errline = ""
 	}
@@ -263,7 +263,7 @@ func (o *importer) resolveFormat() (reader.Format, error) {
 	if sel != importerAuto {
 		return reader.Format(sel), nil
 	}
-	f := importerDetect(strings.TrimSpace(o.path.text))
+	f := importerDetect(strings.TrimSpace(o.path.String()))
 	if f == "" {
 		return "", fmt.Errorf("cannot detect format from name; pick one explicitly")
 	}
@@ -297,14 +297,14 @@ func (o *importer) keyOptions(msg tea.KeyPressMsg) (ui.Overlay, tea.Cmd) {
 		case importerOptInfer:
 			o.inferIdx = (o.inferIdx + 1) % len(importerInferModes)
 		case importerOptSep:
-			o.sep.key(msg)
+			o.sep.Handle(msg)
 		}
 		return o, nil
 	case "left":
 		switch focused {
 		case importerOptSep:
-			if o.sep.cursor > 0 {
-				o.sep.key(msg)
+			if o.sep.Cursor() > 0 {
+				o.sep.Handle(msg)
 				return o, nil
 			}
 		case importerOptInfer:
@@ -317,14 +317,16 @@ func (o *importer) keyOptions(msg tea.KeyPressMsg) (ui.Overlay, tea.Cmd) {
 	case "right":
 		switch focused {
 		case importerOptSep:
-			o.sep.key(msg)
+			o.sep.Handle(msg)
 		case importerOptInfer:
 			o.inferIdx = (o.inferIdx + 1) % len(importerInferModes)
 		}
 		return o, nil
 	}
-	if focused == importerOptSep && o.sep.key(msg) {
-		o.errline = ""
+	if focused == importerOptSep {
+		if _, handled := o.sep.Handle(msg); handled {
+			o.errline = ""
+		}
 	}
 	return o, nil
 }
@@ -345,14 +347,14 @@ func (o *importer) startImport() (ui.Overlay, tea.Cmd) {
 	opt.NoHeader = o.noHeader
 	opt.InferSchema = importerInferModes[o.inferIdx]
 	if o.chosen == reader.FormatDSV {
-		sep, err := importerParseSep(o.sep.text)
+		sep, err := importerParseSep(o.sep.String())
 		if err != nil {
 			o.errline = err.Error()
 			return o, nil
 		}
 		opt.Separator = sep
 	}
-	path := strings.TrimSpace(o.path.text)
+	path := strings.TrimSpace(o.path.String())
 	format := o.chosen
 	o.loading = true
 	o.errline = ""
@@ -419,13 +421,13 @@ func importerParseSep(s string) (rune, error) {
 func (o *importer) cycleCompletion() {
 	if len(o.matches) > 0 {
 		o.matchIdx = (o.matchIdx + 1) % len(o.matches)
-		o.path.set(o.matches[o.matchIdx])
+		o.path.Set(o.matches[o.matchIdx])
 		return
 	}
-	o.matches = importerComplete(o.path.text)
+	o.matches = importerComplete(o.path.String())
 	o.matchIdx = 0
 	if len(o.matches) > 0 {
-		o.path.set(o.matches[0])
+		o.path.Set(o.matches[0])
 	}
 	if len(o.matches) == 1 {
 		o.matches = nil // fully completed; next tab recomputes (descends into dirs)
@@ -502,9 +504,14 @@ func (o *importer) View(width, height int, th *theme.Theme) string {
 }
 
 func (o *importer) viewPath(th *theme.Theme) []string {
+	// While a load is in flight the path renders without the cursor.
+	path := o.path.Render(th)
+	if o.loading {
+		path = th.Input.Render(o.path.String())
+	}
 	lines := []string{
 		th.Text.Render(" file path or http(s) URL:"),
-		" " + th.Subtle.Render("> ") + o.path.render(!o.loading, th),
+		" " + th.Subtle.Render("> ") + path,
 	}
 	if len(o.matches) > 0 {
 		show := o.matches
@@ -541,7 +548,7 @@ func (o *importer) viewFormat(th *theme.Theme) []string {
 	for i := o.formatOff; i < end; i++ {
 		name := o.formats[i]
 		if name == importerAuto {
-			if f := importerDetect(strings.TrimSpace(o.path.text)); f != "" {
+			if f := importerDetect(strings.TrimSpace(o.path.String())); f != "" {
 				name = fmt.Sprintf("auto (%s)", f)
 			}
 		}
@@ -582,9 +589,9 @@ func (o *importer) viewOptions(th *theme.Theme) []string {
 		prefix := "  separator    "
 		if focused == importerOptSep {
 			prefix = "▸ separator    "
-			lines = append(lines, " "+th.ListItem.Render(prefix)+o.sep.render(true, th))
+			lines = append(lines, " "+th.ListItem.Render(prefix)+o.sep.Render(th))
 		} else {
-			lines = append(lines, " "+th.ListItem.Render(prefix+o.sep.text))
+			lines = append(lines, " "+th.ListItem.Render(prefix+o.sep.String()))
 		}
 	}
 
@@ -639,89 +646,4 @@ func importerScroll(off, sel, total, size int) int {
 		off = 0
 	}
 	return off
-}
-
-// --- line input ----------------------------------------------------------------
-
-// importerInput is a minimal single-line text input (text + cursor over runes).
-type importerInput struct {
-	text   string
-	cursor int // rune index, 0..len(runes)
-}
-
-func (in *importerInput) set(s string) {
-	in.text = s
-	in.cursor = len([]rune(s))
-}
-
-// key applies one key press; it reports whether the input consumed the key.
-func (in *importerInput) key(msg tea.KeyPressMsg) bool {
-	r := []rune(in.text)
-	switch msg.String() {
-	case "backspace", "ctrl+h":
-		if in.cursor > 0 {
-			in.text = string(r[:in.cursor-1]) + string(r[in.cursor:])
-			in.cursor--
-		}
-		return true
-	case "delete":
-		if in.cursor < len(r) {
-			in.text = string(r[:in.cursor]) + string(r[in.cursor+1:])
-		}
-		return true
-	case "left":
-		if in.cursor > 0 {
-			in.cursor--
-		}
-		return true
-	case "right":
-		if in.cursor < len(r) {
-			in.cursor++
-		}
-		return true
-	case "home", "ctrl+a":
-		in.cursor = 0
-		return true
-	case "end", "ctrl+e":
-		in.cursor = len(r)
-		return true
-	case "ctrl+u":
-		in.text = string(r[in.cursor:])
-		in.cursor = 0
-		return true
-	}
-	if msg.Text != "" && msg.Mod == 0 {
-		in.text = string(r[:in.cursor]) + msg.Text + string(r[in.cursor:])
-		in.cursor += len([]rune(msg.Text))
-		return true
-	}
-	return false
-}
-
-// paste inserts pasted text at the cursor as a single edit, flattened to one
-// line. It reports whether the text changed.
-func (in *importerInput) paste(s string) bool {
-	t := pasteSanitize(s)
-	if t == "" {
-		return false
-	}
-	r := []rune(in.text)
-	in.text = string(r[:in.cursor]) + t + string(r[in.cursor:])
-	in.cursor += len([]rune(t))
-	return true
-}
-
-// render draws the input with a block cursor when focused.
-func (in *importerInput) render(focused bool, th *theme.Theme) string {
-	if !focused {
-		return th.Input.Render(in.text)
-	}
-	r := []rune(in.text)
-	before := string(r[:in.cursor])
-	cur, after := " ", ""
-	if in.cursor < len(r) {
-		cur = string(r[in.cursor])
-		after = string(r[in.cursor+1:])
-	}
-	return th.Input.Render(before) + th.ListSelected.Render(cur) + th.Input.Render(after)
 }

@@ -14,12 +14,12 @@ import (
 )
 
 const (
-	SELECT   = "select"
-	WITH     = "with"
-	EXPLAIN  = "explain"
-	SHOW     = "show"
-	TABLE    = "table"
-	VALUES   = "values"
+	SELECT  = "select"
+	WITH    = "with"
+	EXPLAIN = "explain"
+	SHOW    = "show"
+	TABLE   = "table"
+	VALUES  = "values"
 
 	// QueryTimeout is the default timeout for queries
 	QueryTimeout = 30 * time.Second
@@ -95,13 +95,6 @@ func NewDB(dsn string, dbName string) (*DB, error) {
 	return DbClient, nil
 }
 
-// GetDB returns the global database client.
-func GetDB() *DB {
-	clientMu.RLock()
-	defer clientMu.RUnlock()
-	return DbClient
-}
-
 type RawCommandResult struct {
 	Fields  []string
 	Records [][]string
@@ -126,7 +119,7 @@ func (db *DB) RawSqlCommand(query string) (rawCmdResult RawCommandResult, err er
 		case strings.HasPrefix(first, "("):
 			rawCmdResult.IsDQL = true
 		default:
-			rawCmdResult.IsDQL = hasReturningClause(cmd)
+			rawCmdResult.IsDQL = dbapi.HasReturningClause(cmd)
 		}
 	}
 
@@ -136,17 +129,6 @@ func (db *DB) RawSqlCommand(query string) (rawCmdResult RawCommandResult, err er
 	}
 	rawCmdResult.Result, err = db.RawExec(query)
 	return rawCmdResult, err
-}
-
-// hasReturningClause reports whether the statement contains a RETURNING
-// clause, whose result set would be silently discarded by db.Exec.
-func hasReturningClause(words []string) bool {
-	for _, word := range words[1:] {
-		if strings.EqualFold(word, "returning") {
-			return true
-		}
-	}
-	return false
 }
 
 func (db *DB) RawQuery(query string) (fields []string, records [][]string, err error) {
@@ -164,7 +146,7 @@ func (db *DB) RawQuery(query string) (fields []string, records [][]string, err e
 		return nil, nil, err
 	}
 
-	records, err = readRecords(rows)
+	records, err = dbapi.ReadNativeRows(rows)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -207,7 +189,7 @@ func (db *DB) ShowDatabases() ([]string, error) {
 }
 
 func (db *DB) ShowDatabaseTables(database string) ([]string, error) {
-	query := fmt.Sprintf("SELECT TABLE_NAME FROM %s.INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = 'BASE TABLE' ORDER BY TABLE_NAME", quoteIdent(database))
+	query := fmt.Sprintf("SELECT TABLE_NAME FROM %s.INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = 'BASE TABLE' ORDER BY TABLE_NAME", dbapi.QuoteIdentBracket(database))
 	ctx, cancel := context.WithTimeout(context.Background(), QueryTimeout)
 	defer cancel()
 
@@ -239,7 +221,7 @@ func (db *DB) FetchTableFields(table string) ([]string, error) {
 	}
 	defer rows.Close()
 
-	records, err := readRecords(rows)
+	records, err := dbapi.ReadNativeRows(rows)
 	if err != nil {
 		return nil, err
 	}
@@ -252,7 +234,7 @@ func (db *DB) FetchTableFields(table string) ([]string, error) {
 }
 
 func (db *DB) FetchTableRecords(table string) ([][]string, error) {
-	query := fmt.Sprintf("select * from %s", quoteIdent(table))
+	query := fmt.Sprintf("select * from %s", dbapi.QuoteIdentBracket(table))
 	ctx, cancel := context.WithTimeout(context.Background(), QueryTimeout)
 	defer cancel()
 
@@ -262,7 +244,7 @@ func (db *DB) FetchTableRecords(table string) ([][]string, error) {
 	}
 	defer rows.Close()
 
-	records, err := readRecords(rows)
+	records, err := dbapi.ReadNativeRows(rows)
 	if err != nil {
 		return nil, err
 	}
@@ -372,62 +354,9 @@ func (db *DB) ColumnIndexTypes(database, table string) (map[string]string, error
 		if isUnique {
 			label = "UNIQUE"
 		}
-		if existing, ok := result[colName]; !ok || indexPriority(existing) < indexPriority(label) {
+		if existing, ok := result[colName]; !ok || dbapi.IndexPriority(existing) < dbapi.IndexPriority(label) {
 			result[colName] = label
 		}
 	}
 	return result, rows.Err()
-}
-
-func indexPriority(label string) int {
-	switch label {
-	case "PK":
-		return 3
-	case "UNIQUE":
-		return 2
-	case "INDEX":
-		return 1
-	}
-	return 0
-}
-
-func quoteIdent(name string) string {
-	return "[" + strings.ReplaceAll(name, "]", "]]") + "]"
-}
-
-func readRecords(rows *sql.Rows) ([][]string, error) {
-	columns, err := rows.Columns()
-	if err != nil {
-		return nil, err
-	}
-	var records [][]string
-	for rows.Next() {
-		record := make([]any, len(columns))
-		for i := range columns {
-			record[i] = new(any)
-		}
-
-		if err := rows.Scan(record...); err != nil {
-			return nil, err
-		}
-		var currentRow []string
-		for _, rawValue := range record {
-			currentRow = append(currentRow, formatValue(*(rawValue.(*any))))
-		}
-		records = append(records, currentRow)
-	}
-	return records, rows.Err()
-}
-
-func formatValue(value any) string {
-	switch v := value.(type) {
-	case nil:
-		return "NULL"
-	case []byte:
-		return string(v)
-	case time.Time:
-		return v.Format("2006-01-02 15:04:05")
-	default:
-		return fmt.Sprintf("%v", v)
-	}
 }

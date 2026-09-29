@@ -50,37 +50,37 @@ func importerType(o *importer, s string) {
 // --- line input ----------------------------------------------------------------
 
 func TestImporterInputEditing(t *testing.T) {
-	var in importerInput
+	var in ui.LineInput
 	for _, r := range "héllo" {
-		in.key(importerKey(string(r)))
+		in.Handle(importerKey(string(r)))
 	}
-	if in.text != "héllo" || in.cursor != 5 {
-		t.Fatalf("insert: got %q cursor %d", in.text, in.cursor)
+	if in.String() != "héllo" || in.Cursor() != 5 {
+		t.Fatalf("insert: got %q cursor %d", in.String(), in.Cursor())
 	}
-	in.key(importerKey("left"))
-	in.key(importerKey("left"))
-	in.key(importerKey("backspace")) // delete second 'l'... actually the 'l' before cursor
-	if in.text != "hélo" || in.cursor != 2 {
-		t.Fatalf("backspace: got %q cursor %d", in.text, in.cursor)
+	in.Handle(importerKey("left"))
+	in.Handle(importerKey("left"))
+	in.Handle(importerKey("backspace")) // delete second 'l'... actually the 'l' before cursor
+	if in.String() != "hélo" || in.Cursor() != 2 {
+		t.Fatalf("backspace: got %q cursor %d", in.String(), in.Cursor())
 	}
-	in.key(importerKey("x"))
-	if in.text != "héxlo" || in.cursor != 3 {
-		t.Fatalf("mid insert: got %q cursor %d", in.text, in.cursor)
+	in.Handle(importerKey("x"))
+	if in.String() != "héxlo" || in.Cursor() != 3 {
+		t.Fatalf("mid insert: got %q cursor %d", in.String(), in.Cursor())
 	}
-	in.key(importerKey("home"))
-	if in.cursor != 0 {
-		t.Fatalf("home: cursor %d", in.cursor)
+	in.Handle(importerKey("home"))
+	if in.Cursor() != 0 {
+		t.Fatalf("home: cursor %d", in.Cursor())
 	}
-	in.key(tea.KeyPressMsg{Code: tea.KeyDelete})
-	if in.text != "éxlo" {
-		t.Fatalf("delete: got %q", in.text)
+	in.Handle(tea.KeyPressMsg{Code: tea.KeyDelete})
+	if in.String() != "éxlo" {
+		t.Fatalf("delete: got %q", in.String())
 	}
-	in.key(importerKey("end"))
-	if in.cursor != 4 {
-		t.Fatalf("end: cursor %d", in.cursor)
+	in.Handle(importerKey("end"))
+	if in.Cursor() != 4 {
+		t.Fatalf("end: cursor %d", in.Cursor())
 	}
 	// modified printables must not be inserted
-	if in.key(tea.KeyPressMsg{Code: 'c', Text: "c", Mod: tea.ModCtrl}) {
+	if _, handled := in.Handle(tea.KeyPressMsg{Code: 'c', Text: "c", Mod: tea.ModCtrl}); handled {
 		t.Fatalf("ctrl-modified key should not be consumed as text")
 	}
 }
@@ -164,16 +164,16 @@ func TestImporterTabCycles(t *testing.T) {
 	}
 	o := newImporter(filepath.Join(dir, "a"))
 	o.Update(importerKey("tab"))
-	if o.path.text != filepath.Join(dir, "aa.csv") {
-		t.Fatalf("first tab: %q", o.path.text)
+	if o.path.String() != filepath.Join(dir, "aa.csv") {
+		t.Fatalf("first tab: %q", o.path.String())
 	}
 	o.Update(importerKey("tab"))
-	if o.path.text != filepath.Join(dir, "ab.csv") {
-		t.Fatalf("second tab: %q", o.path.text)
+	if o.path.String() != filepath.Join(dir, "ab.csv") {
+		t.Fatalf("second tab: %q", o.path.String())
 	}
 	o.Update(importerKey("tab")) // wraps
-	if o.path.text != filepath.Join(dir, "aa.csv") {
-		t.Fatalf("third tab: %q", o.path.text)
+	if o.path.String() != filepath.Join(dir, "aa.csv") {
+		t.Fatalf("third tab: %q", o.path.String())
 	}
 	// editing resets the cycle
 	o.Update(importerKey("backspace"))
@@ -406,8 +406,8 @@ func TestImporterPaste(t *testing.T) {
 
 	// Step 1: paste lands in the path input as one edit, flattened.
 	o.Update(tea.PasteMsg{Content: "data\r\n.csv"})
-	if o.path.text != "data .csv" {
-		t.Fatalf("path after paste = %q", o.path.text)
+	if o.path.String() != "data .csv" {
+		t.Fatalf("path after paste = %q", o.path.String())
 	}
 
 	// A paste invalidates a pending completion cycle and the error line.
@@ -418,15 +418,15 @@ func TestImporterPaste(t *testing.T) {
 	if o.matches != nil || o.errline != "" {
 		t.Fatalf("paste kept stale state: matches=%v errline=%q", o.matches, o.errline)
 	}
-	if o.path.text != "file.csv" {
-		t.Fatalf("path = %q", o.path.text)
+	if o.path.String() != "file.csv" {
+		t.Fatalf("path = %q", o.path.String())
 	}
 
 	// Step 2 (format list) ignores pastes.
 	o.step = importerStepFormat
 	o.Update(tea.PasteMsg{Content: "zzz"})
-	if o.path.text != "file.csv" || o.formatIdx != 0 {
-		t.Fatalf("format step consumed paste: path=%q idx=%d", o.path.text, o.formatIdx)
+	if o.path.String() != "file.csv" || o.formatIdx != 0 {
+		t.Fatalf("format step consumed paste: path=%q idx=%d", o.path.String(), o.formatIdx)
 	}
 
 	// Step 3: paste reaches the separator input when it has focus and is
@@ -434,39 +434,39 @@ func TestImporterPaste(t *testing.T) {
 	o.step = importerStepOptions
 	o.chosen = reader.FormatDSV
 	o.optFocus = 1 // separator row
-	o.sep.set("")
+	o.sep.Set("")
 	o.Update(tea.PasteMsg{Content: "|\n"})
-	if o.sep.text != "|" {
-		t.Fatalf("sep after paste = %q, want |", o.sep.text)
+	if o.sep.String() != "|" {
+		t.Fatalf("sep after paste = %q, want |", o.sep.String())
 	}
 
 	// Step 3 with a non-separator row focused ignores pastes.
 	o.optFocus = 0
 	o.Update(tea.PasteMsg{Content: ";"})
-	if o.sep.text != "|" {
-		t.Fatalf("unfocused sep changed: %q", o.sep.text)
+	if o.sep.String() != "|" {
+		t.Fatalf("unfocused sep changed: %q", o.sep.String())
 	}
 
 	// While loading, pastes are swallowed.
 	o.step = importerStepPath
 	o.loading = true
 	o.Update(tea.PasteMsg{Content: "x"})
-	if o.path.text != "file.csv" {
-		t.Fatalf("loading wizard consumed paste: %q", o.path.text)
+	if o.path.String() != "file.csv" {
+		t.Fatalf("loading wizard consumed paste: %q", o.path.String())
 	}
 }
 
 func TestImporterInputPaste(t *testing.T) {
-	var in importerInput
-	in.set("ab")
-	in.cursor = 1
-	if !in.paste("X\nY") {
+	var in ui.LineInput
+	in.Set("ab")
+	in.SetCursor(1)
+	if !in.Paste("X\nY") {
 		t.Fatal("paste should report a change")
 	}
-	if in.text != "aX Yb" || in.cursor != 4 {
-		t.Fatalf("after paste: %q cursor %d", in.text, in.cursor)
+	if in.String() != "aX Yb" || in.Cursor() != 4 {
+		t.Fatalf("after paste: %q cursor %d", in.String(), in.Cursor())
 	}
-	if in.paste("\r") {
+	if in.Paste("\r") {
 		t.Fatal("control-only paste must not report a change")
 	}
 }

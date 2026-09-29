@@ -334,11 +334,11 @@ func TestActEditTogglesAndCtrlSCommits(t *testing.T) {
 	if !p.SheetEditing {
 		t.Fatal("e should toggle SheetEditing on")
 	}
-	if len(p.SheetEdit) == 0 {
+	if p.SheetEdit.Len() == 0 {
 		t.Fatal("SheetEdit should be prefilled with the current field value")
 	}
-	if p.SheetEditCur != len(p.SheetEdit) {
-		t.Fatalf("SheetEditCur = %d, want %d", p.SheetEditCur, len(p.SheetEdit))
+	if p.SheetEdit.Cursor() != p.SheetEdit.Len() {
+		t.Fatalf("SheetEdit cursor = %d, want %d", p.SheetEdit.Cursor(), p.SheetEdit.Len())
 	}
 
 	// While editing, j must NOT move the field.
@@ -350,8 +350,8 @@ func TestActEditTogglesAndCtrlSCommits(t *testing.T) {
 
 	// Typing appends to the edit buffer.
 	a.Update(key("Z"))
-	if string(p.SheetEdit) == "" || p.SheetEdit[len(p.SheetEdit)-1] != 'Z' {
-		t.Fatalf("typed rune not appended: %q", string(p.SheetEdit))
+	if edited := p.SheetEdit.String(); edited == "" || edited[len(edited)-1] != 'Z' {
+		t.Fatalf("typed rune not appended: %q", edited)
 	}
 
 	// ctrl+s sets pendingEdit and dispatches confirmsave (overlay pushed by
@@ -360,8 +360,8 @@ func TestActEditTogglesAndCtrlSCommits(t *testing.T) {
 	if a.pendingEdit == nil {
 		t.Fatal("ctrl+s should set pendingEdit")
 	}
-	if a.pendingEdit.NewValue != string(p.SheetEdit) {
-		t.Fatalf("pendingEdit.NewValue = %q, want %q", a.pendingEdit.NewValue, string(p.SheetEdit))
+	if a.pendingEdit.NewValue != p.SheetEdit.String() {
+		t.Fatalf("pendingEdit.NewValue = %q, want %q", a.pendingEdit.NewValue, p.SheetEdit.String())
 	}
 	if len(a.overlays) == 0 {
 		t.Fatal("confirmsave overlay should be pushed")
@@ -380,7 +380,7 @@ func TestActEditEscCancels(t *testing.T) {
 	if p.SheetEditing {
 		t.Fatal("esc should cancel inline edit")
 	}
-	if p.SheetEdit != nil {
+	if p.SheetEdit.Len() != 0 {
 		t.Fatal("esc should clear the edit buffer")
 	}
 }
@@ -663,18 +663,18 @@ func TestSheetFilterFlow(t *testing.T) {
 	if !p.SheetFiltering {
 		t.Fatal("/ should set SheetFiltering")
 	}
-	if len(p.SheetFilter) != 0 {
-		t.Fatalf("SheetFilter should start empty, got %q", string(p.SheetFilter))
+	if p.SheetFilter.Len() != 0 {
+		t.Fatalf("SheetFilter should start empty, got %q", p.SheetFilter.String())
 	}
 
 	// Type "na" -> SheetFilter holds the runes and the matched set is just
 	// "name"; SheetField stays 0 (the first match).
 	a.Update(key("n"))
 	a.Update(key("a"))
-	if string(p.SheetFilter) != "na" {
-		t.Fatalf("SheetFilter = %q, want %q", string(p.SheetFilter), "na")
+	if p.SheetFilter.String() != "na" {
+		t.Fatalf("SheetFilter = %q, want %q", p.SheetFilter.String(), "na")
 	}
-	matched := sheetMatchedCols(f, string(p.SheetFilter))
+	matched := sheetMatchedCols(f, p.SheetFilter.String())
 	if len(matched) != 1 || matched[0] != 1 {
 		t.Fatalf("matched for 'na' = %v, want [1]", matched)
 	}
@@ -698,8 +698,8 @@ func TestSheetFilterFlow(t *testing.T) {
 	if p.SheetFiltering {
 		t.Fatal("esc should exit filter input")
 	}
-	if len(p.SheetFilter) != 0 {
-		t.Fatalf("esc should clear SheetFilter, got %q", string(p.SheetFilter))
+	if p.SheetFilter.Len() != 0 {
+		t.Fatalf("esc should clear SheetFilter, got %q", p.SheetFilter.String())
 	}
 	// After clearing, the full key list is back.
 	view = a.View()
@@ -728,8 +728,8 @@ func TestSheetFilterEnterKeepsFilterApplied(t *testing.T) {
 	if p.SheetFiltering {
 		t.Fatal("enter should exit filter input")
 	}
-	if string(p.SheetFilter) != "na" {
-		t.Fatalf("enter should keep the filter applied, got %q", string(p.SheetFilter))
+	if p.SheetFilter.String() != "na" {
+		t.Fatalf("enter should keep the filter applied, got %q", p.SheetFilter.String())
 	}
 	// j moves within the matched set (still length 1), so the cursor stays.
 	a.Update(key("j"))
@@ -752,24 +752,24 @@ func TestSheetFilterBackspaceAndCtrlU(t *testing.T) {
 	a.Update(key("n"))
 	a.Update(key("a"))
 	p := a.pane()
-	if string(p.SheetFilter) != "na" {
-		t.Fatalf("SheetFilter = %q, want na", string(p.SheetFilter))
+	if p.SheetFilter.String() != "na" {
+		t.Fatalf("SheetFilter = %q, want na", p.SheetFilter.String())
 	}
 	// backspace -> "n", which matches "name" still.
 	a.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
-	if string(p.SheetFilter) != "n" {
-		t.Fatalf("after backspace SheetFilter = %q, want n", string(p.SheetFilter))
+	if p.SheetFilter.String() != "n" {
+		t.Fatalf("after backspace SheetFilter = %q, want n", p.SheetFilter.String())
 	}
-	matched := sheetMatchedCols(f, string(p.SheetFilter))
+	matched := sheetMatchedCols(f, p.SheetFilter.String())
 	if len(matched) != 1 || matched[0] != 1 {
 		t.Fatalf("matched for 'n' = %v, want [1]", matched)
 	}
 	// ctrl+u clears the buffer -> empty pattern matches all columns.
 	a.Update(tea.KeyPressMsg{Code: 'u', Mod: tea.ModCtrl})
-	if string(p.SheetFilter) != "" {
-		t.Fatalf("ctrl+u should clear SheetFilter, got %q", string(p.SheetFilter))
+	if p.SheetFilter.String() != "" {
+		t.Fatalf("ctrl+u should clear SheetFilter, got %q", p.SheetFilter.String())
 	}
-	matched = sheetMatchedCols(f, string(p.SheetFilter))
+	matched = sheetMatchedCols(f, p.SheetFilter.String())
 	if len(matched) != f.NumCols() {
 		t.Fatalf("after ctrl+u matched = %d cols, want %d", len(matched), f.NumCols())
 	}

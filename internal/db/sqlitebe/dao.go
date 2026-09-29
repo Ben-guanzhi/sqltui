@@ -71,17 +71,6 @@ func NewDB(file string) (*DB, error) {
 	return DbClinet, nil
 }
 
-func GetDB() *DB {
-	return DbClinet
-}
-
-func GetDbFile() string {
-	if DbClinet == nil {
-		return ""
-	}
-	return DbClinet.File
-}
-
 type RawCommandResult struct {
 	Fields  []string
 	Records [][]string
@@ -101,7 +90,7 @@ func (db *DB) RawSqlCommand(query string) (rawCmdResult RawCommandResult, err er
 	default:
 		// INSERT/UPDATE/DELETE ... RETURNING (SQLite >= 3.35) also produces
 		// a result set that db.Exec would silently discard.
-		rawCmdResult.IsDQL = hasReturningClause(words)
+		rawCmdResult.IsDQL = dbapi.HasReturningClause(words)
 	}
 
 	if rawCmdResult.IsDQL {
@@ -110,17 +99,6 @@ func (db *DB) RawSqlCommand(query string) (rawCmdResult RawCommandResult, err er
 	}
 	rawCmdResult.Result, err = db.RawExec(query)
 	return rawCmdResult, err
-}
-
-// hasReturningClause reports whether the statement contains a RETURNING
-// clause, whose result set would be silently discarded by db.Exec.
-func hasReturningClause(words []string) bool {
-	for _, word := range words[1:] {
-		if strings.EqualFold(word, "returning") {
-			return true
-		}
-	}
-	return false
 }
 
 func (db *DB) RawQuery(query string) (fields []string, records [][]string, err error) {
@@ -135,7 +113,7 @@ func (db *DB) RawQuery(query string) (fields []string, records [][]string, err e
 		return nil, nil, err
 	}
 
-	records, err = readRecords(rows)
+	records, err = dbapi.ReadRawBytesRows(rows)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -173,14 +151,14 @@ func (db *DB) ListTables() ([]string, error) {
 
 // FetchTableFields returns the column names of a table via PRAGMA table_info.
 func (db *DB) FetchTableFields(table string) ([]string, error) {
-	query := fmt.Sprintf("PRAGMA table_info(%s)", quoteIdentifier(table))
+	query := fmt.Sprintf("PRAGMA table_info(%s)", dbapi.QuoteIdentDouble(table))
 	rows, err := db.Query(query)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	records, err := readRecords(rows)
+	records, err := dbapi.ReadRawBytesRows(rows)
 	if err != nil {
 		return nil, err
 	}
@@ -196,14 +174,14 @@ func (db *DB) FetchTableFields(table string) ([]string, error) {
 }
 
 func (db *DB) FetchTableRecords(table string) ([][]string, error) {
-	query := fmt.Sprintf("select * from %s limit %d", quoteIdentifier(table), FetchLimit)
+	query := fmt.Sprintf("select * from %s limit %d", dbapi.QuoteIdentDouble(table), FetchLimit)
 	rows, err := db.Query(query)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	return readRecords(rows)
+	return dbapi.ReadRawBytesRows(rows)
 }
 
 // ListPrimaryKeys lists the primary-key column names of table, in pk-ordinal
@@ -272,7 +250,7 @@ func (db *DB) ColumnIndexTypes(table string) (map[string]string, error) {
 	}
 
 	// Other indexes from index_list + index_info
-	listQuery := fmt.Sprintf("PRAGMA index_list(%s)", quoteIdentifier(table))
+	listQuery := fmt.Sprintf("PRAGMA index_list(%s)", dbapi.QuoteIdentDouble(table))
 	_, idxList, err := db.RawQuery(listQuery)
 	if err != nil {
 		return result, nil // silently degrade if pragma fails
@@ -293,7 +271,7 @@ func (db *DB) ColumnIndexTypes(table string) (map[string]string, error) {
 			label = "UNIQUE"
 		}
 
-		infoQuery := fmt.Sprintf("PRAGMA index_info(%s)", quoteIdentifier(idxName))
+		infoQuery := fmt.Sprintf("PRAGMA index_info(%s)", dbapi.QuoteIdentDouble(idxName))
 		_, infoRecords, err := db.RawQuery(infoQuery)
 		if err != nil {
 			continue
@@ -304,7 +282,7 @@ func (db *DB) ColumnIndexTypes(table string) (map[string]string, error) {
 				continue
 			}
 			colName := col[2]
-			if existing, ok := result[colName]; !ok || indexPriority(existing) < indexPriority(label) {
+			if existing, ok := result[colName]; !ok || dbapi.IndexPriority(existing) < dbapi.IndexPriority(label) {
 				result[colName] = label
 			}
 		}
@@ -312,54 +290,12 @@ func (db *DB) ColumnIndexTypes(table string) (map[string]string, error) {
 	return result, nil
 }
 
-func indexPriority(label string) int {
-	switch label {
-	case "PK":
-		return 3
-	case "UNIQUE":
-		return 2
-	case "INDEX":
-		return 1
-	}
-	return 0
-}
-
 func (db *DB) Close() error {
 	return db.DB.Close()
-}
-
-// quoteIdentifier quotes a sqlite identifier with double quotes, doubling
-// any embedded double quote.
-func quoteIdentifier(name string) string {
-	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
 }
 
 // quoteString wraps name in a single-quoted SQL string literal, doubling any
 // embedded single quote. Used for the table argument of pragma_table_info.
 func quoteString(name string) string {
 	return "'" + strings.ReplaceAll(name, "'", "''") + "'"
-}
-
-func readRecords(rows *sql.Rows) ([][]string, error) {
-	columns, err := rows.Columns()
-	if err != nil {
-		return nil, err
-	}
-	var records [][]string
-	for rows.Next() {
-		record := make([]any, len(columns))
-		for i := range record {
-			record[i] = &sql.RawBytes{}
-		}
-
-		if err := rows.Scan(record...); err != nil {
-			return nil, err
-		}
-		currentRow := make([]string, 0, len(columns))
-		for _, rawValue := range record {
-			currentRow = append(currentRow, string(*rawValue.(*sql.RawBytes)))
-		}
-		records = append(records, currentRow)
-	}
-	return records, rows.Err()
 }

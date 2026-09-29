@@ -58,7 +58,7 @@ func TestHistColumnFloats(t *testing.T) {
 }
 
 func TestHistBuilderFlow(t *testing.T) {
-	b := &histBuilder{frame: histTestFrame(), input: histNewInput("10")}
+	b := &histBuilder{frame: histTestFrame(), input: ui.NewLineInput("10")}
 
 	// enter on non-numeric column shows an inline error, stays on step 1
 	ov, _ := b.Update(histKey("enter"))
@@ -105,7 +105,7 @@ func TestHistBuilderFlow(t *testing.T) {
 }
 
 func TestHistBuilderEmptyBucketsDefaultsToTen(t *testing.T) {
-	b := &histBuilder{frame: histTestFrame(), input: histNewInput("10")}
+	b := &histBuilder{frame: histTestFrame(), input: ui.NewLineInput("10")}
 	b.Update(histKey("down"))
 	b.Update(histKey("enter"))
 	b.Update(histKey("backspace"))
@@ -118,7 +118,7 @@ func TestHistBuilderEmptyBucketsDefaultsToTen(t *testing.T) {
 }
 
 func TestHistBuilderColumnFilter(t *testing.T) {
-	b := &histBuilder{frame: histTestFrame(), input: histNewInput("10")}
+	b := &histBuilder{frame: histTestFrame(), input: ui.NewLineInput("10")}
 
 	// Typing narrows the column list; letters no longer navigate.
 	for _, k := range []string{"m", "i", "x"} {
@@ -134,7 +134,7 @@ func TestHistBuilderColumnFilter(t *testing.T) {
 }
 
 func TestHistBuilderEscClearsFilterFirst(t *testing.T) {
-	b := &histBuilder{frame: histTestFrame(), input: histNewInput("10")}
+	b := &histBuilder{frame: histTestFrame(), input: ui.NewLineInput("10")}
 	b.Update(histKey("z"))
 	if len(b.filter.idx) != 0 {
 		t.Fatalf("filtered = %v, want none", b.filter.idx)
@@ -158,7 +158,7 @@ func TestHistBuilderEscClearsFilterFirst(t *testing.T) {
 }
 
 func TestHistInputEditing(t *testing.T) {
-	in := histNewInput("10")
+	in := ui.NewLineInput("10")
 	in.Handle(histKey("left"))
 	in.Handle(histKey("2"))
 	if in.String() != "120" {

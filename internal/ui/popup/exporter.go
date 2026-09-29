@@ -67,8 +67,7 @@ type exporter struct {
 	compSel int  // parquet compression index
 
 	// destination path input
-	path    []rune
-	cursor  int
+	path    ui.LineInput
 	confirm string // absolute path pending overwrite confirmation
 
 	errText string // inline validation hint
@@ -130,16 +129,14 @@ func (e *exporter) Update(msg tea.Msg) (ui.Overlay, tea.Cmd) {
 // path on the path page, or the csv/tsv separator (single character) on the
 // option page. Other pages ignore pastes.
 func (e *exporter) paste(content string) {
-	text := pasteSanitize(content)
+	text := ui.SanitizePaste(content)
 	if text == "" {
 		return
 	}
 	switch e.step {
 	case exportStepPath:
 		e.errText = ""
-		r := []rune(text)
-		e.path = append(e.path[:e.cursor], append(r, e.path[e.cursor:]...)...)
-		e.cursor += len(r)
+		e.path.Insert(text)
 	case exportStepOptions:
 		format := e.format()
 		if (format == "csv" || format == "tsv") && e.optSel == 0 {
@@ -203,14 +200,13 @@ func (e *exporter) enterOptionsOrPath() {
 // enterPath moves to the destination page, prefilling "<tab title>.<ext>".
 func (e *exporter) enterPath() {
 	e.step = exportStepPath
-	if len(e.path) == 0 {
+	if e.path.Len() == 0 {
 		base := e.ctx.BaseCrumb()
 		if base == "" {
 			base = "export"
 		}
-		e.path = []rune(base + "." + exportExt(e.format()))
+		e.path.Set(base + "." + exportExt(e.format()))
 	}
-	e.cursor = len(e.path)
 }
 
 func (e *exporter) keyOptions(key, text string) tea.Cmd {
@@ -269,34 +265,22 @@ func (e *exporter) keyPath(key, text string) tea.Cmd {
 	case "enter":
 		return e.submitPath()
 	case "backspace":
-		if e.cursor > 0 {
-			e.path = append(e.path[:e.cursor-1], e.path[e.cursor:]...)
-			e.cursor--
-		}
+		e.path.Backspace()
 	case "delete":
-		if e.cursor < len(e.path) {
-			e.path = append(e.path[:e.cursor], e.path[e.cursor+1:]...)
-		}
+		e.path.Delete()
 	case "left":
-		if e.cursor > 0 {
-			e.cursor--
-		}
+		e.path.Left()
 	case "right":
-		if e.cursor < len(e.path) {
-			e.cursor++
-		}
+		e.path.Right()
 	case "home", "ctrl+a":
-		e.cursor = 0
+		e.path.Home()
 	case "end", "ctrl+e":
-		e.cursor = len(e.path)
+		e.path.End()
 	case "ctrl+u":
-		e.path = e.path[:0]
-		e.cursor = 0
+		e.path.Clear()
 	default:
 		if text != "" {
-			r := []rune(text)
-			e.path = append(e.path[:e.cursor], append(r, e.path[e.cursor:]...)...)
-			e.cursor += len(r)
+			e.path.InsertKey(text)
 		}
 	}
 	return nil
@@ -305,7 +289,7 @@ func (e *exporter) keyPath(key, text string) tea.Cmd {
 // submitPath validates the destination and either asks for overwrite
 // confirmation or writes immediately.
 func (e *exporter) submitPath() tea.Cmd {
-	p := strings.TrimSpace(string(e.path))
+	p := strings.TrimSpace(e.path.String())
 	if p == "" {
 		e.errText = "destination path is required"
 		return nil
@@ -416,7 +400,7 @@ func (e *exporter) View(width, height int, th *theme.Theme) string {
 		lines = append(lines, "", th.Subtle.Render(" enter continue · esc back"))
 	case exportStepPath:
 		title = "Export — " + e.format() + " destination"
-		lines = append(lines, th.Text.Render(" Path: ")+e.viewInput(th))
+		lines = append(lines, th.Text.Render(" Path: ")+e.path.Render(th))
 		if e.errText != "" {
 			lines = append(lines, th.Error.Render(" "+e.errText))
 		}
@@ -471,15 +455,3 @@ func (e *exporter) viewOptions(th *theme.Theme) []string {
 	return nil
 }
 
-// viewInput renders the path line input with a block cursor.
-func (e *exporter) viewInput(th *theme.Theme) string {
-	before := string(e.path[:e.cursor])
-	var at, after string
-	if e.cursor < len(e.path) {
-		at = string(e.path[e.cursor])
-		after = string(e.path[e.cursor+1:])
-	} else {
-		at = " "
-	}
-	return th.Input.Render(before) + th.ListSelected.Render(at) + th.Input.Render(after)
-}

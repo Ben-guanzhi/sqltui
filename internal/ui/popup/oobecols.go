@@ -122,7 +122,7 @@ func (o *oobeColPicker) View(w, h int, th *theme.Theme) string {
 		if o.selected[o.cols[i]] {
 			check = "✓ "
 		}
-		label := oobePad(fmt.Sprintf(" %s %s", check, c), inner)
+		label := ui.Pad(fmt.Sprintf(" %s %s", check, c), inner)
 		if i == o.cursor {
 			lines = append(lines, th.ListSelected.Render(label))
 		} else {
@@ -135,7 +135,7 @@ func (o *oobeColPicker) View(w, h int, th *theme.Theme) string {
 			selectedCount++
 		}
 	}
-	hint := th.Subtle.Render(oobePad(fmt.Sprintf(" space toggle  a all  enter save (%d selected)", selectedCount), inner))
+	hint := th.Subtle.Render(ui.Pad(fmt.Sprintf(" space toggle  a all  enter save (%d selected)", selectedCount), inner))
 	lines = append(lines, hint)
 	body := strings.Join(lines, "\n")
 	return ui.Box("select columns", body, bw, th)

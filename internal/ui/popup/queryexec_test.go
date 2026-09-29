@@ -300,63 +300,63 @@ func TestQxRunCmdMessages(t *testing.T) {
 }
 
 func TestQxInputEditing(t *testing.T) {
-	in := qxNewInput("")
+	in := ui.NewLineInput("")
 	feed := func(keys ...string) {
 		for _, k := range keys {
-			in.handle(qxKey(k))
+			in.Handle(qxKey(k))
 		}
 	}
 
 	feed("a", "b", "c")
-	if in.String() != "abc" || in.cursor != 3 {
-		t.Fatalf("after typing: %q cursor %d", in.String(), in.cursor)
+	if in.String() != "abc" || in.Cursor() != 3 {
+		t.Fatalf("after typing: %q cursor %d", in.String(), in.Cursor())
 	}
 	feed("left", "backspace")
-	if in.String() != "ac" || in.cursor != 1 {
-		t.Fatalf("after left+backspace: %q cursor %d", in.String(), in.cursor)
+	if in.String() != "ac" || in.Cursor() != 1 {
+		t.Fatalf("after left+backspace: %q cursor %d", in.String(), in.Cursor())
 	}
 	feed("home", "delete")
-	if in.String() != "c" || in.cursor != 0 {
-		t.Fatalf("after home+delete: %q cursor %d", in.String(), in.cursor)
+	if in.String() != "c" || in.Cursor() != 0 {
+		t.Fatalf("after home+delete: %q cursor %d", in.String(), in.Cursor())
 	}
 	feed("end", "x")
-	if in.String() != "cx" || in.cursor != 2 {
-		t.Fatalf("after end+insert: %q cursor %d", in.String(), in.cursor)
+	if in.String() != "cx" || in.Cursor() != 2 {
+		t.Fatalf("after end+insert: %q cursor %d", in.String(), in.Cursor())
 	}
 
-	in = qxNewInput("one two")
-	in.handle(qxKey("ctrl+w"))
+	in = ui.NewLineInput("one two")
+	in.Handle(qxKey("ctrl+w"))
 	if in.String() != "one " {
 		t.Errorf("ctrl+w: %q", in.String())
 	}
-	in.handle(qxKey("ctrl+u"))
-	if in.String() != "" || in.cursor != 0 {
-		t.Errorf("ctrl+u: %q cursor %d", in.String(), in.cursor)
+	in.Handle(qxKey("ctrl+u"))
+	if in.String() != "" || in.Cursor() != 0 {
+		t.Errorf("ctrl+u: %q cursor %d", in.String(), in.Cursor())
 	}
 
 	// Prefill puts the cursor at the end.
-	in = qxNewInput("sql")
-	if in.String() != "sql" || in.cursor != 3 {
-		t.Errorf("prefill: %q cursor %d", in.String(), in.cursor)
+	in = ui.NewLineInput("sql")
+	if in.String() != "sql" || in.Cursor() != 3 {
+		t.Errorf("prefill: %q cursor %d", in.String(), in.Cursor())
 	}
 }
 
 func TestQxInputApplySuggestion(t *testing.T) {
-	in := qxNewInput("select na")
-	in.applySuggestion("name")
-	if in.String() != "select name" || in.cursor != len("select name") {
-		t.Errorf("apply at end: %q cursor %d", in.String(), in.cursor)
+	in := ui.NewLineInput("select na")
+	qxApplySuggestion(&in, "name")
+	if in.String() != "select name" || in.Cursor() != len("select name") {
+		t.Errorf("apply at end: %q cursor %d", in.String(), in.Cursor())
 	}
 
 	// Mid-string replacement keeps the tail.
-	in = qxNewInput("SELECT na FROM t")
-	in.cursor = len("SELECT na")
-	in.applySuggestion("name")
+	in = ui.NewLineInput("SELECT na FROM t")
+	in.SetCursor(len("SELECT na"))
+	qxApplySuggestion(&in, "name")
 	if in.String() != "SELECT name FROM t" {
 		t.Errorf("apply mid-string: %q", in.String())
 	}
-	if in.cursor != len("SELECT name") {
-		t.Errorf("cursor after mid-string apply = %d", in.cursor)
+	if in.Cursor() != len("SELECT name") {
+		t.Errorf("cursor after mid-string apply = %d", in.Cursor())
 	}
 }
 
@@ -472,29 +472,29 @@ func TestPasteSanitize(t *testing.T) {
 		{"", ""},
 	}
 	for _, c := range cases {
-		if got := pasteSanitize(c.in); got != c.want {
-			t.Errorf("pasteSanitize(%q) = %q, want %q", c.in, got, c.want)
+		if got := ui.SanitizePaste(c.in); got != c.want {
+			t.Errorf("SanitizePaste(%q) = %q, want %q", c.in, got, c.want)
 		}
 	}
 }
 
 func TestQxInputPaste(t *testing.T) {
 	// A multi-character paste is one edit at the cursor.
-	in := qxNewInput("SELECT  FROM t")
-	in.cursor = len("SELECT ")
-	if !in.paste("name,\nage") {
+	in := ui.NewLineInput("SELECT  FROM t")
+	in.SetCursor(len("SELECT "))
+	if !in.Paste("name,\nage") {
 		t.Fatal("paste should report a change")
 	}
 	if in.String() != "SELECT name, age FROM t" {
 		t.Fatalf("text = %q", in.String())
 	}
-	if in.cursor != len("SELECT name, age") {
-		t.Fatalf("cursor = %d, want %d", in.cursor, len("SELECT name, age"))
+	if in.Cursor() != len("SELECT name, age") {
+		t.Fatalf("cursor = %d, want %d", in.Cursor(), len("SELECT name, age"))
 	}
 
 	// Empty and control-only pastes change nothing.
 	before := in.String()
-	if in.paste("") || in.paste("\r") {
+	if in.Paste("") || in.Paste("\r") {
 		t.Fatal("empty paste must not report a change")
 	}
 	if in.String() != before {

@@ -84,10 +84,10 @@ func RegisterFactories(kind string) {
 	})
 
 	ui.Factories["opentable"] = openTableFactory
-	ui.Factories["connect"] = func(ctx ui.AppContext, arg string) (ui.Overlay, error) {
-		return newConnForm(ctx, kind), nil
-	}
-	addPaletteCommand("connect", "open the database connection form")
+	popup.RegisterCommand(popup.Command{Name: "connect", Description: "open the database connection form"},
+		func(ctx ui.AppContext, arg string) (ui.Overlay, error) {
+			return newConnForm(ctx, kind), nil
+		})
 
 	if kind == KindOpenObserve {
 		ui.Factories["schema"] = func(ctx ui.AppContext, arg string) (ui.Overlay, error) {
@@ -129,17 +129,6 @@ func RegisterFactories(kind string) {
 		}
 		return nil, fmt.Errorf("schema: no connection")
 	}
-}
-
-// addPaletteCommand lists a command in the palette table (once). Dispatch by
-// exact name works regardless; this only makes the command visible.
-func addPaletteCommand(name, desc string) {
-	for _, c := range popup.Commands {
-		if c.Name == name {
-			return
-		}
-	}
-	popup.Commands = append(popup.Commands, popup.Command{Name: name, Description: desc})
 }
 
 // --- connection tracking --------------------------------------------------------

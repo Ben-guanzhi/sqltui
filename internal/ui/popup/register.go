@@ -19,17 +19,14 @@ func init() {
 		if ctx.CurrentFrame() == nil {
 			return nil, fmt.Errorf("register: no table open")
 		}
-		p := &registerPrompt{input: []rune(strings.TrimSpace(arg))}
-		p.cursor = len(p.input)
-		return p, nil
+		return &registerPrompt{input: ui.NewLineInput(strings.TrimSpace(arg))}, nil
 	}
 }
 
 // registerPrompt asks for a table name to register the current frame under
 // in the embedded SQL engine.
 type registerPrompt struct {
-	input  []rune
-	cursor int // insertion point in runes
+	input  ui.LineInput
 	errMsg string
 }
 
@@ -52,37 +49,29 @@ func (p *registerPrompt) registerKey(key, text string) (cmd tea.Cmd, close bool)
 	case "esc", "ctrl+c":
 		return nil, true
 	case "enter":
-		name := strings.TrimSpace(string(p.input))
+		name := strings.TrimSpace(p.input.String())
 		if msg := registerValidate(name); msg != "" {
 			p.errMsg = msg
 			return nil, false
 		}
 		return func() tea.Msg { return ui.RegisterTableMsg{Name: name} }, true
 	case "backspace":
-		if p.cursor > 0 {
-			p.input = append(p.input[:p.cursor-1], p.input[p.cursor:]...)
-			p.cursor--
-		}
+		p.input.Backspace()
 	case "delete":
-		if p.cursor < len(p.input) {
-			p.input = append(p.input[:p.cursor], p.input[p.cursor+1:]...)
-		}
+		p.input.Delete()
 	case "left":
-		p.cursor = max(0, p.cursor-1)
+		p.input.Left()
 	case "right":
-		p.cursor = min(len(p.input), p.cursor+1)
+		p.input.Right()
 	case "home", "ctrl+a":
-		p.cursor = 0
+		p.input.Home()
 	case "end", "ctrl+e":
-		p.cursor = len(p.input)
+		p.input.End()
 	case "ctrl+u":
-		p.input = append([]rune{}, p.input[p.cursor:]...)
-		p.cursor = 0
+		p.input.CtrlU()
 	default:
 		if text != "" && !strings.ContainsAny(text, "\n\r") {
-			r := []rune(text)
-			p.input = append(p.input[:p.cursor], append(r, p.input[p.cursor:]...)...)
-			p.cursor += len(r)
+			p.input.InsertKey(text)
 			p.errMsg = ""
 		}
 	}
@@ -92,9 +81,7 @@ func (p *registerPrompt) registerKey(key, text string) (cmd tea.Cmd, close bool)
 func (p *registerPrompt) Update(msg tea.Msg) (ui.Overlay, tea.Cmd) {
 	if pm, ok := msg.(tea.PasteMsg); ok {
 		// Insert the paste at the cursor as one edit, flattened to one line.
-		if text := []rune(pasteSanitize(pm.Content)); len(text) > 0 {
-			p.input = append(p.input[:p.cursor], append(text, p.input[p.cursor:]...)...)
-			p.cursor += len(text)
+		if p.input.Paste(pm.Content) {
 			p.errMsg = ""
 		}
 		return p, nil
@@ -106,7 +93,7 @@ func (p *registerPrompt) Update(msg tea.Msg) (ui.Overlay, tea.Cmd) {
 	cmd, close := p.registerKey(key.String(), key.Text)
 	if close {
 		if cmd != nil {
-			name := strings.TrimSpace(string(p.input))
+			name := strings.TrimSpace(p.input.String())
 			toast := func() tea.Msg {
 				return ui.ToastMsg{Text: fmt.Sprintf("registered table %q", name)}
 			}
@@ -124,18 +111,7 @@ func (p *registerPrompt) View(width, height int, th *theme.Theme) string {
 	}
 	inner := boxW - 2
 
-	before := string(p.input[:p.cursor])
-	var at, after string
-	if p.cursor < len(p.input) {
-		at = string(p.input[p.cursor])
-		after = string(p.input[p.cursor+1:])
-	} else {
-		at = " "
-	}
-	line := " " + th.Subtle.Render("table name:") + " " +
-		th.Input.Render(before) +
-		th.ListSelected.Render(at) +
-		th.Input.Render(after)
+	line := " " + th.Subtle.Render("table name:") + " " + p.input.Render(th)
 
 	body := line
 	if p.errMsg != "" {

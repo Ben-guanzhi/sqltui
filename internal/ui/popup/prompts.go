@@ -62,7 +62,7 @@ type qxPrompt struct {
 	ctx   ui.AppContext
 	kind  string
 	title string
-	in    qxInput
+	in    ui.LineInput
 	sug   qxSuggest
 }
 
@@ -78,12 +78,12 @@ func (p *qxPrompt) refresh() {
 	if be := p.ctx.Backend(); be != nil {
 		sc.Engine = be.Kind()
 	}
-	p.sug.recompute(p.in.String(), p.in.byteCursor(), sc)
+	p.sug.recompute(p.in.String(), p.in.ByteCursor(), sc)
 }
 
 func (p *qxPrompt) Update(msg tea.Msg) (ui.Overlay, tea.Cmd) {
 	if pm, ok := msg.(tea.PasteMsg); ok {
-		if p.in.paste(pm.Content) {
+		if p.in.Paste(pm.Content) {
 			p.refresh()
 		}
 		return p, nil
@@ -117,7 +117,7 @@ func (p *qxPrompt) Update(msg tea.Msg) (ui.Overlay, tea.Cmd) {
 
 	case "enter":
 		if p.sug.open() {
-			p.in.applySuggestion(p.sug.selected().Text)
+			qxApplySuggestion(&p.in, p.sug.selected().Text)
 			p.sug.clear()
 			return p, nil
 		}
@@ -129,7 +129,7 @@ func (p *qxPrompt) Update(msg tea.Msg) (ui.Overlay, tea.Cmd) {
 		return p, tea.Batch(ui.CloseOverlay, qxPromptRunCmd(p.ctx, p.kind, sqlText))
 	}
 
-	handled, changed := p.in.handle(key)
+	handled, changed := p.in.Handle(key)
 	if changed {
 		p.refresh()
 	} else if handled {
@@ -142,7 +142,7 @@ func (p *qxPrompt) View(width, height int, th *theme.Theme) string {
 	w := qxBoxWidth(width)
 	inner := w - 2
 
-	lines := []string{" " + p.in.view(inner-2, th)}
+	lines := []string{" " + p.in.View(inner-2, th)}
 	lines = append(lines, p.sug.view(th)...)
 	lines = append(lines, th.Placeholder.Render(" enter run · tab complete · esc close"))
 	return ui.Box(p.title, strings.Join(lines, "\n"), w, th)

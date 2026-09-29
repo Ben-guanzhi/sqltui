@@ -48,11 +48,11 @@ func TestRedisPromptTabAppliesAndCycles(t *testing.T) {
 	first, second := p.sugg[0].Command, p.sugg[1].Command
 
 	p.Update(keyPress("tab"))
-	if got := string(p.input); got != first+" " {
+	if got := p.input.String(); got != first+" " {
 		t.Fatalf("first tab applied %q, want %q", got, first+" ")
 	}
 	p.Update(keyPress("tab"))
-	if got := string(p.input); got != second+" " {
+	if got := p.input.String(); got != second+" " {
 		t.Fatalf("second tab applied %q, want %q", got, second+" ")
 	}
 	// Editing after cycling recomputes from the new text.
@@ -167,26 +167,26 @@ func TestKeyBrowserLazyLoadAndOpenKey(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("Init did not scan the first section")
 	}
-	if !b.sections[0].open || !b.sections[0].loading {
+	if !b.sections[0].Open || !b.sections[0].Loading {
 		t.Fatal("first section not opening")
 	}
 	for _, s := range b.sections[1:] {
-		if s.open || s.loading {
+		if s.Open || s.Loading {
 			t.Fatal("later sections must stay lazy")
 		}
 	}
 
 	msg := runCmd(cmd)
 	b.Update(msg)
-	if got := b.sections[0].keys; len(got) != 2 {
+	if got := b.sections[0].Items; len(got) != 2 {
 		t.Fatalf("loaded keys = %v", got)
 	}
 
 	// Navigate to the first key and open it: a value viewer is pushed.
 	b.Update(keyPress("down")) // header -> first key
 	rows := b.rows()
-	if rows[b.cursor].key != "greeting" {
-		t.Fatalf("cursor on %q, want greeting", rows[b.cursor].key)
+	if rows[b.state.Cursor].key != "greeting" {
+		t.Fatalf("cursor on %q, want greeting", rows[b.state.Cursor].key)
 	}
 	_, cmd = b.Update(keyPress("enter"))
 	push, ok := runCmd(cmd).(ui.PushOverlayMsg)
@@ -217,11 +217,11 @@ func TestKeyBrowserSectionToggleAndRescan(t *testing.T) {
 	// Enter on the open header closes it; enter again re-opens without a
 	// rescan (already loaded).
 	_, cmd := b.Update(keyPress("enter"))
-	if cmd != nil || b.sections[0].open {
+	if cmd != nil || b.sections[0].Open {
 		t.Fatal("enter on open header must close it without commands")
 	}
 	_, cmd = b.Update(keyPress("enter"))
-	if cmd != nil || !b.sections[0].open {
+	if cmd != nil || !b.sections[0].Open {
 		t.Fatal("re-opening a loaded section must not rescan")
 	}
 
@@ -232,7 +232,7 @@ func TestKeyBrowserSectionToggleAndRescan(t *testing.T) {
 		t.Fatal("r did not rescan")
 	}
 	b.Update(runCmd(cmd))
-	if got := len(b.sections[0].keys); got != 3 {
+	if got := len(b.sections[0].Items); got != 3 {
 		t.Fatalf("rescan loaded %d keys, want 3", got)
 	}
 }
@@ -241,7 +241,7 @@ func TestKeyBrowserScanError(t *testing.T) {
 	kv := &fakeKV{scanErr: fmt.Errorf("connection lost")}
 	b := newKeyBrowser(kv, 1)
 	b.Update(runCmd(b.Init()))
-	if b.sections[0].errText == "" {
+	if b.sections[0].Err == nil {
 		t.Fatal("scan error not recorded")
 	}
 	if !strings.Contains(b.View(80, 24, testTheme()), "connection lost") {
@@ -409,8 +409,8 @@ func TestKeyBrowserFilterNarrowsKeys(t *testing.T) {
 		t.Fatalf("filter dropped on enter: %v", got)
 	}
 	b.Update(keyPress("down")) // header -> counter
-	if rows := b.rows(); rows[b.cursor].key != "counter" {
-		t.Fatalf("cursor on %q, want counter", rows[b.cursor].key)
+	if rows := b.rows(); rows[b.state.Cursor].key != "counter" {
+		t.Fatalf("cursor on %q, want counter", rows[b.state.Cursor].key)
 	}
 	_, cmd := b.Update(keyPress("enter"))
 	push, ok := runCmd(cmd).(ui.PushOverlayMsg)
@@ -455,9 +455,9 @@ func TestKeyBrowserFilterEscBehavior(t *testing.T) {
 	b.Update(keyPress("/"))
 	typeText(t, b, "a")
 	_, cmd := b.Update(keyPress("esc"))
-	if cmd != nil || b.filtering || len(b.filter) != 0 {
+	if cmd != nil || b.filtering || b.filter.Len() != 0 {
 		t.Fatalf("esc while typing: cmd=%v filtering=%v filter=%q",
-			cmd, b.filtering, string(b.filter))
+			cmd, b.filtering, b.filter.String())
 	}
 	if got := browserKeys(b); len(got) != 2 {
 		t.Fatalf("keys after clear = %v, want both", got)
@@ -469,7 +469,7 @@ func TestKeyBrowserFilterEscBehavior(t *testing.T) {
 	typeText(t, b, "a")
 	b.Update(keyPress("enter"))
 	_, cmd = b.Update(keyPress("esc"))
-	if cmd != nil || len(b.filter) != 0 {
+	if cmd != nil || b.filter.Len() != 0 {
 		t.Fatal("esc with a committed filter must only clear it")
 	}
 	_, cmd = b.Update(keyPress("esc"))
@@ -490,12 +490,12 @@ func TestKeyBrowserFilterTypingDoesNotTriggerShortcuts(t *testing.T) {
 	if cmd != nil {
 		t.Fatal("q while filtering must not close")
 	}
-	if string(b.filter) != "rq" {
-		t.Fatalf("filter = %q, want rq", string(b.filter))
+	if b.filter.String() != "rq" {
+		t.Fatalf("filter = %q, want rq", b.filter.String())
 	}
 	// backspace edits the filter.
 	ov.Update(keyPress("backspace"))
-	if string(b.filter) != "r" {
-		t.Fatalf("filter after backspace = %q, want r", string(b.filter))
+	if b.filter.String() != "r" {
+		t.Fatalf("filter after backspace = %q, want r", b.filter.String())
 	}
 }

@@ -23,7 +23,7 @@ func init() {
 // prefills the line but never auto-executes.
 type qxEditor struct {
 	ctx ui.AppContext
-	in  qxInput
+	in  ui.LineInput
 	sug qxSuggest
 	// sc is the completion schema. Contexts implementing qxSchemaProvider
 	// refresh it live on every keystroke (cheap: engine PRAGMAs or a cache
@@ -46,7 +46,7 @@ type qxSchemaMsg struct {
 }
 
 func qxNewEditor(ctx ui.AppContext, arg string) *qxEditor {
-	return &qxEditor{ctx: ctx, in: qxNewInput(arg), warmed: make(map[string]bool)}
+	return &qxEditor{ctx: ctx, in: ui.NewLineInput(arg), warmed: make(map[string]bool)}
 }
 
 // Init warms the live table catalog and snapshots the schema, both off the
@@ -66,7 +66,7 @@ func (e *qxEditor) refresh() {
 	} else {
 		e.sc.Current = e.ctx.ColumnNames()
 	}
-	e.sug.recompute(e.in.String(), e.in.byteCursor(), e.sc)
+	e.sug.recompute(e.in.String(), e.in.ByteCursor(), e.sc)
 }
 
 // warmDotCmd kicks an async column fetch when the cursor sits in a
@@ -78,7 +78,7 @@ func (e *qxEditor) warmDotCmd() tea.Cmd {
 	if !ok {
 		return nil
 	}
-	tbl, ok := query.DotTable(e.in.String(), e.in.byteCursor(), e.sc)
+	tbl, ok := query.DotTable(e.in.String(), e.in.ByteCursor(), e.sc)
 	if !ok || e.warmed[tbl] || len(e.sc.Tables[tbl]) > 0 {
 		return nil
 	}
@@ -99,7 +99,7 @@ func (e *qxEditor) Update(msg tea.Msg) (ui.Overlay, tea.Cmd) {
 		return e, nil
 	}
 	if pm, ok := msg.(tea.PasteMsg); ok {
-		if e.in.paste(pm.Content) {
+		if e.in.Paste(pm.Content) {
 			e.refresh()
 			return e, e.warmDotCmd()
 		}
@@ -135,7 +135,7 @@ func (e *qxEditor) Update(msg tea.Msg) (ui.Overlay, tea.Cmd) {
 
 	case "enter":
 		if e.sug.open() {
-			e.in.applySuggestion(e.sug.selected().Text)
+			qxApplySuggestion(&e.in, e.sug.selected().Text)
 			e.sug.clear()
 			return e, nil
 		}
@@ -154,7 +154,7 @@ func (e *qxEditor) Update(msg tea.Msg) (ui.Overlay, tea.Cmd) {
 		return e, tea.Batch(ui.CloseOverlay, run)
 	}
 
-	handled, changed := e.in.handle(key)
+	handled, changed := e.in.Handle(key)
 	if changed {
 		e.refresh()
 		return e, e.warmDotCmd()
@@ -169,7 +169,7 @@ func (e *qxEditor) View(width, height int, th *theme.Theme) string {
 	w := qxBoxWidth(width)
 	inner := w - 2
 
-	lines := []string{" " + e.in.view(inner-2, th)}
+	lines := []string{" " + e.in.View(inner-2, th)}
 	lines = append(lines, e.sug.view(th)...)
 	lines = append(lines, th.Placeholder.Render(" enter run · tab complete · esc close"))
 	return ui.Box("query", strings.Join(lines, "\n"), w, th)

@@ -133,7 +133,7 @@ func TestExportWizardCSV(t *testing.T) {
 	if e.step != exportStepPath {
 		t.Fatalf("step = %d, want path", e.step)
 	}
-	if got := string(e.path); got != "mytab.csv" {
+	if got := e.path.String(); got != "mytab.csv" {
 		t.Fatalf("prefill = %q, want mytab.csv", got)
 	}
 
@@ -179,8 +179,7 @@ func TestExportOverwriteConfirm(t *testing.T) {
 	ctx := &exportStubCtx{frame: exportTestFrame(), crumb: "t"}
 	e := exportNew(t, ctx)
 	e.step = exportStepPath
-	e.path = []rune(dst)
-	e.cursor = len(e.path)
+	e.path = ui.NewLineInput(dst)
 
 	if cmd := e.handleKey("enter", ""); cmd != nil {
 		t.Fatalf("expected confirm step, got messages %#v", exportDrain(cmd))
@@ -219,8 +218,7 @@ func TestExportPathErrorStaysOpen(t *testing.T) {
 	ctx := &exportStubCtx{frame: exportTestFrame(), crumb: "t"}
 	e := exportNew(t, ctx)
 	e.step = exportStepPath
-	e.path = []rune(filepath.Join(t.TempDir(), "no", "such", "dir", "x.csv"))
-	e.cursor = len(e.path)
+	e.path = ui.NewLineInput(filepath.Join(t.TempDir(), "no", "such", "dir", "x.csv"))
 
 	msgs := exportDrain(e.handleKey("enter", ""))
 	var errSeen bool
@@ -269,7 +267,7 @@ func TestExportBackNavigation(t *testing.T) {
 	if e.step != exportStepPath {
 		t.Fatalf("step = %d, want path", e.step)
 	}
-	if got := string(e.path); got != "t.json" {
+	if got := e.path.String(); got != "t.json" {
 		t.Fatalf("prefill = %q, want t.json", got)
 	}
 	e.handleKey("esc", "")
@@ -291,20 +289,20 @@ func TestExportPathEditing(t *testing.T) {
 	e.handleKey("home", "")
 	e.handleKey("right", "")
 	e.handleKey("x", "x") // a x b.csv
-	if got := string(e.path); got != "axb.csv" {
+	if got := e.path.String(); got != "axb.csv" {
 		t.Fatalf("insert: %q", got)
 	}
 	e.handleKey("backspace", "")
-	if got := string(e.path); got != "ab.csv" {
+	if got := e.path.String(); got != "ab.csv" {
 		t.Fatalf("backspace: %q", got)
 	}
 	e.handleKey("delete", "")
-	if got := string(e.path); got != "a.csv" {
+	if got := e.path.String(); got != "a.csv" {
 		t.Fatalf("delete: %q", got)
 	}
 	e.handleKey("end", "")
-	if e.cursor != len(e.path) {
-		t.Fatalf("cursor = %d, want %d", e.cursor, len(e.path))
+	if e.path.Cursor() != e.path.Len() {
+		t.Fatalf("cursor = %d, want %d", e.path.Cursor(), e.path.Len())
 	}
 
 	// empty path refused with inline hint
@@ -319,7 +317,9 @@ func TestExportPathEditing(t *testing.T) {
 
 func TestExportExpandPath(t *testing.T) {
 	home := t.TempDir()
+	// os.UserHomeDir reads USERPROFILE on Windows and HOME elsewhere.
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	if got := exportExpandPath("~/x.csv"); got != filepath.Join(home, "x.csv") {
 		t.Fatalf("expand = %q", got)
 	}
@@ -352,7 +352,7 @@ func TestExportParquetCompressionPick(t *testing.T) {
 		t.Fatalf("compression = %q, want gzip", exportCompressions[e.compSel])
 	}
 	e.handleKey("enter", "")
-	if got := string(e.path); got != "t.parquet" {
+	if got := e.path.String(); got != "t.parquet" {
 		t.Fatalf("prefill = %q, want t.parquet", got)
 	}
 }
@@ -381,18 +381,18 @@ func TestExportPaste(t *testing.T) {
 
 	// Path page: paste inserts at the cursor as one edit, flattened.
 	e.step = exportStepPath
-	e.path = []rune(".csv")
-	e.cursor = 0
+	e.path = ui.NewLineInput(".csv")
+	e.path.SetCursor(0)
 	e.errText = "old"
 	ov, cmd := e.Update(tea.PasteMsg{Content: "out\r\nfile"})
 	if ov != ui.Overlay(e) || cmd != nil {
 		t.Fatal("paste replaced the overlay or produced a command")
 	}
-	if got := string(e.path); got != "out file.csv" {
+	if got := e.path.String(); got != "out file.csv" {
 		t.Fatalf("path after paste = %q", got)
 	}
-	if e.cursor != len([]rune("out file")) || e.errText != "" {
-		t.Fatalf("cursor=%d errText=%q", e.cursor, e.errText)
+	if e.path.Cursor() != len([]rune("out file")) || e.errText != "" {
+		t.Fatalf("cursor=%d errText=%q", e.path.Cursor(), e.errText)
 	}
 
 	// Options page: pasting one character (with clipboard newline) sets the

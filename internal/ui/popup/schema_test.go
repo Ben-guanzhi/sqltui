@@ -172,8 +172,8 @@ func TestSchemaEntriesFileMode(t *testing.T) {
 		t.Errorf("tab row label = %q", rows[1].label)
 	}
 	// Cursor starts on the active tab.
-	if o.cursor != 2 || rows[o.cursor].tab != 1 {
-		t.Errorf("cursor = %d (tab %d), want row for active tab 1", o.cursor, rows[o.cursor].tab)
+	if o.state.Cursor != 2 || rows[o.state.Cursor].tab != 1 {
+		t.Errorf("cursor = %d (tab %d), want row for active tab 1", o.state.Cursor, rows[o.state.Cursor].tab)
 	}
 }
 
@@ -198,11 +198,11 @@ func TestSchemaConnectedNamespaceEagerOthersCollapsed(t *testing.T) {
 	if len(o.groups) != 3 || o.groups[0].ns != "main" {
 		t.Fatalf("groups = %+v, want main first of 3", o.groups)
 	}
-	if !o.groups[0].open || !o.groups[0].loaded || !o.groups[0].connected {
+	if !o.groups[0].Open || !o.groups[0].Loaded || !o.groups[0].connected {
 		t.Errorf("connected group state = %+v", o.groups[0])
 	}
 	for _, g := range o.groups[1:] {
-		if g.open || g.loaded {
+		if g.Open || g.Loaded {
 			t.Errorf("group %q must stay collapsed and unloaded: %+v", g.ns, g)
 		}
 	}
@@ -242,7 +242,7 @@ func TestSchemaNoCurrentNamespaceAllCollapsed(t *testing.T) {
 		t.Errorf("live rows = %v, want none before expansion", got)
 	}
 	for _, g := range o.groups {
-		if g.open || g.loaded {
+		if g.Open || g.Loaded {
 			t.Errorf("group %q must start collapsed: %+v", g.ns, g)
 		}
 	}
@@ -317,17 +317,17 @@ func TestSchemaLazyExpandAndCollapse(t *testing.T) {
 	if target < 0 {
 		t.Fatal("no aux group header")
 	}
-	o.cursor = target
+	o.state.Cursor = target
 	_, cmd := o.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if cmd == nil {
 		t.Fatal("enter on unloaded group must start the lazy load")
 	}
-	if !o.groups[1].open || !o.groups[1].loading {
+	if !o.groups[1].Open || !o.groups[1].Loading {
 		t.Fatalf("group state after enter = %+v, want open+loading", o.groups[1])
 	}
 	// The listing arrives asynchronously and expands in place.
 	o.Update(cmd())
-	if !o.groups[1].loaded || o.groups[1].loading {
+	if !o.groups[1].Loaded || o.groups[1].Loading {
 		t.Fatalf("group state after load = %+v, want loaded", o.groups[1])
 	}
 	got := schemaLiveLabels(o)
@@ -344,19 +344,19 @@ func TestSchemaLazyExpandAndCollapse(t *testing.T) {
 	rows = o.rows()
 	for i, r := range rows {
 		if r.kind == schemaGroup && o.groups[r.group].ns == "aux" {
-			o.cursor = i
+			o.state.Cursor = i
 		}
 	}
 	before := len(be.tblCalls)
 	_, cmd = o.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-	if cmd != nil || o.groups[1].open {
+	if cmd != nil || o.groups[1].Open {
 		t.Fatal("enter on open group must collapse it without commands")
 	}
 	// Re-expanding a loaded group does not hit the backend again.
 	rows = o.rows()
 	for i, r := range rows {
 		if r.kind == schemaGroup && o.groups[r.group].ns == "aux" {
-			o.cursor = i
+			o.state.Cursor = i
 		}
 	}
 	o.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
@@ -374,7 +374,7 @@ func TestSchemaGroupLoadError(t *testing.T) {
 	be.tblErr = errors.New("access denied")
 	for i, r := range o.rows() {
 		if r.kind == schemaGroup && o.groups[r.group].ns == "aux" {
-			o.cursor = i
+			o.state.Cursor = i
 		}
 	}
 	_, cmd := o.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
@@ -438,8 +438,8 @@ func TestSchemaFilterNarrowsTabsAndTables(t *testing.T) {
 		t.Error("unloaded namespaces not flagged while filtering")
 	}
 	// The cursor landed on a selectable row.
-	if o.cursor < 0 || !rows[o.cursor].selectable() {
-		t.Errorf("cursor = %d, not on a selectable row", o.cursor)
+	if o.state.Cursor < 0 || !rows[o.state.Cursor].selectable() {
+		t.Errorf("cursor = %d, not on a selectable row", o.state.Cursor)
 	}
 }
 
@@ -468,13 +468,13 @@ func TestSchemaFilterMatchesUnloadedNamespaceName(t *testing.T) {
 		t.Fatal("matching unloaded namespace not shown while filtering")
 	}
 	// Enter on it loads the namespace.
-	o.cursor = target
+	o.state.Cursor = target
 	_, cmd := o.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if cmd == nil {
 		t.Fatal("enter on unloaded group must start the lazy load")
 	}
 	o.Update(cmd())
-	if !o.groups[1].loaded {
+	if !o.groups[1].Loaded {
 		t.Fatal("group not loaded after expansion")
 	}
 }
@@ -491,18 +491,18 @@ func TestSchemaFilterSearchesLoadedCollapsedGroups(t *testing.T) {
 	// Load aux, then collapse it again.
 	for i, r := range o.rows() {
 		if r.kind == schemaGroup && o.groups[r.group].ns == "aux" {
-			o.cursor = i
+			o.state.Cursor = i
 		}
 	}
 	_, cmd := o.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	o.Update(cmd())
 	for i, r := range o.rows() {
 		if r.kind == schemaGroup && o.groups[r.group].ns == "aux" {
-			o.cursor = i
+			o.state.Cursor = i
 		}
 	}
 	o.Update(tea.KeyPressMsg{Code: tea.KeyEnter}) // collapse
-	if o.groups[1].open {
+	if o.groups[1].Open {
 		t.Fatal("aux should be collapsed")
 	}
 	// Filtering still finds its (already loaded) tables.
@@ -633,24 +633,24 @@ func TestSchemaNavigationSkipsHeaders(t *testing.T) {
 	ctx := schemaTestCtx{tabs: []ui.TabInfo{{Title: "a", Shape: "1 x 1"}}, backend: be}
 	o := schemaOpen(ctx)
 	// db mode skips the tabs section; rows: [header tables][group m][live x]
-	if o.cursor != 1 {
-		t.Fatalf("initial cursor = %d, want 1", o.cursor)
+	if o.state.Cursor != 1 {
+		t.Fatalf("initial cursor = %d, want 1", o.state.Cursor)
 	}
 	o.Update(tea.KeyPressMsg{Code: tea.KeyDown})
-	if o.cursor != 2 {
-		t.Errorf("cursor after down = %d, want 2", o.cursor)
+	if o.state.Cursor != 2 {
+		t.Errorf("cursor after down = %d, want 2", o.state.Cursor)
 	}
 	o.Update(tea.KeyPressMsg{Code: tea.KeyDown})
-	if o.cursor != 2 {
-		t.Errorf("cursor after down at bottom = %d, want 2", o.cursor)
+	if o.state.Cursor != 2 {
+		t.Errorf("cursor after down at bottom = %d, want 2", o.state.Cursor)
 	}
 	o.Update(tea.KeyPressMsg{Code: tea.KeyUp})
-	if o.cursor != 1 {
-		t.Errorf("cursor after up = %d, want 1", o.cursor)
+	if o.state.Cursor != 1 {
+		t.Errorf("cursor after up = %d, want 1", o.state.Cursor)
 	}
 	o.Update(tea.KeyPressMsg{Code: tea.KeyUp})
-	if o.cursor != 1 {
-		t.Errorf("cursor after up at top = %d, want 1", o.cursor)
+	if o.state.Cursor != 1 {
+		t.Errorf("cursor after up at top = %d, want 1", o.state.Cursor)
 	}
 }
 
@@ -693,11 +693,11 @@ func TestSchemaEnterOnLiveTable(t *testing.T) {
 	rows := o.rows()
 	for i, r := range rows {
 		if r.kind == schemaLive {
-			o.cursor = i
+			o.state.Cursor = i
 		}
 	}
-	if o.cursor < 0 || rows[o.cursor].kind != schemaLive {
-		t.Fatalf("cursor = %d, not on live row", o.cursor)
+	if o.state.Cursor < 0 || rows[o.state.Cursor].kind != schemaLive {
+		t.Fatalf("cursor = %d, not on live row", o.state.Cursor)
 	}
 	_, cmd := o.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	msgs := schemaTestMsgs(t, cmd)
@@ -721,8 +721,8 @@ func TestSchemaEnterOnLiveTable(t *testing.T) {
 
 func TestSchemaEnterNoSelectable(t *testing.T) {
 	o := schemaOpen(schemaTestCtx{}) // no tabs, no backend
-	if o.cursor != -1 {
-		t.Fatalf("cursor = %d, want -1 with nothing selectable", o.cursor)
+	if o.state.Cursor != -1 {
+		t.Fatalf("cursor = %d, want -1 with nothing selectable", o.state.Cursor)
 	}
 	_, cmd := o.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if cmd != nil {
@@ -740,28 +740,28 @@ func TestSchemaScrollWindow(t *testing.T) {
 	o.View(80, 15, th) // establish viewLen
 
 	rows := o.rows()
-	if o.viewLen >= len(rows) {
-		t.Fatalf("viewLen = %d, expected scrolling window over %d rows", o.viewLen, len(rows))
+	if o.state.ViewLen >= len(rows) {
+		t.Fatalf("viewLen = %d, expected scrolling window over %d rows", o.state.ViewLen, len(rows))
 	}
 	// Page down repeatedly; the window must always contain the cursor.
 	for i := 0; i < 6; i++ {
 		o.Update(tea.KeyPressMsg{Code: tea.KeyPgDown})
 	}
-	if o.cursor != len(rows)-1 {
-		t.Fatalf("cursor after paging = %d, want %d", o.cursor, len(rows)-1)
+	if o.state.Cursor != len(rows)-1 {
+		t.Fatalf("cursor after paging = %d, want %d", o.state.Cursor, len(rows)-1)
 	}
-	if o.cursor < o.offset || o.cursor >= o.offset+o.viewLen {
-		t.Errorf("cursor %d outside window [%d, %d)", o.cursor, o.offset, o.offset+o.viewLen)
+	if o.state.Cursor < o.state.Offset || o.state.Cursor >= o.state.Offset+o.state.ViewLen {
+		t.Errorf("cursor %d outside window [%d, %d)", o.state.Cursor, o.state.Offset, o.state.Offset+o.state.ViewLen)
 	}
 	// And back to the top.
 	for i := 0; i < 6; i++ {
 		o.Update(tea.KeyPressMsg{Code: tea.KeyPgUp})
 	}
-	if o.cursor != 1 {
-		t.Errorf("cursor after paging up = %d, want 1", o.cursor)
+	if o.state.Cursor != 1 {
+		t.Errorf("cursor after paging up = %d, want 1", o.state.Cursor)
 	}
-	if o.offset > o.cursor {
-		t.Errorf("offset %d beyond cursor %d", o.offset, o.cursor)
+	if o.state.Offset > o.state.Cursor {
+		t.Errorf("offset %d beyond cursor %d", o.state.Offset, o.state.Cursor)
 	}
 }
 

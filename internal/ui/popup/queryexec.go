@@ -190,146 +190,23 @@ func qxShortTitle(sqlText string) string {
 	return s
 }
 
-// --- paste handling ------------------------------------------------------------
-
-// pasteSanitize flattens bracketed-paste text for a single-line input:
-// newlines and tabs become single spaces (so multi-line SQL keeps its token
-// boundaries), while carriage returns and all other control characters are
-// dropped. Every popup input funnels tea.PasteMsg content through this.
-func pasteSanitize(s string) string {
-	var b strings.Builder
-	b.Grow(len(s))
-	for _, r := range s {
-		switch {
-		case r == '\n' || r == '\t':
-			b.WriteRune(' ')
-		case r < ' ' || r == 0x7f:
-			// drop \r and other control characters
-		default:
-			b.WriteRune(r)
-		}
-	}
-	return b.String()
-}
-
 // --- line input --------------------------------------------------------------
+//
+// The single-line editing state machine lives in ui.LineInput; the helpers
+// below are the SQL-completion-specific additions on top of it.
 
-// qxInput is a minimal single-line editor: rune slice plus cursor position
-// (rune index, 0..len).
-type qxInput struct {
-	text   []rune
-	cursor int
-}
-
-func qxNewInput(prefill string) qxInput {
-	r := []rune(prefill)
-	return qxInput{text: r, cursor: len(r)}
-}
-
-func (in *qxInput) String() string { return string(in.text) }
-
-// byteCursor converts the rune cursor to the byte offset expected by
-// query.Suggest.
-func (in *qxInput) byteCursor() int { return len(string(in.text[:in.cursor])) }
-
-// handle processes an editing key. It reports whether the key was consumed
-// and whether the text changed. Keys with app-level meaning (enter, tab,
-// esc, up, down) must be intercepted by the caller before this is reached.
-func (in *qxInput) handle(msg tea.KeyPressMsg) (handled, changed bool) {
-	switch msg.String() {
-	case "backspace":
-		if in.cursor > 0 {
-			in.text = append(in.text[:in.cursor-1], in.text[in.cursor:]...)
-			in.cursor--
-			return true, true
-		}
-		return true, false
-	case "delete":
-		if in.cursor < len(in.text) {
-			in.text = append(in.text[:in.cursor], in.text[in.cursor+1:]...)
-			return true, true
-		}
-		return true, false
-	case "left":
-		if in.cursor > 0 {
-			in.cursor--
-		}
-		return true, false
-	case "right":
-		if in.cursor < len(in.text) {
-			in.cursor++
-		}
-		return true, false
-	case "home", "ctrl+a":
-		in.cursor = 0
-		return true, false
-	case "end", "ctrl+e":
-		in.cursor = len(in.text)
-		return true, false
-	case "ctrl+u":
-		if in.cursor > 0 {
-			in.text = append([]rune{}, in.text[in.cursor:]...)
-			in.cursor = 0
-			return true, true
-		}
-		return true, false
-	case "ctrl+w":
-		if in.cursor == 0 {
-			return true, false
-		}
-		start := in.cursor
-		for start > 0 && in.text[start-1] == ' ' {
-			start--
-		}
-		for start > 0 && in.text[start-1] != ' ' {
-			start--
-		}
-		in.text = append(in.text[:start], in.text[in.cursor:]...)
-		in.cursor = start
-		return true, true
-	}
-	if t := msg.Text; t != "" {
-		ins := make([]rune, 0, len(t))
-		for _, r := range t {
-			if r >= ' ' && r != 0x7f {
-				ins = append(ins, r)
-			}
-		}
-		if len(ins) == 0 {
-			return false, false
-		}
-		in.text = append(in.text[:in.cursor], append(ins, in.text[in.cursor:]...)...)
-		in.cursor += len(ins)
-		return true, true
-	}
-	return false, false
-}
-
-// paste inserts pasted text at the cursor as one edit (bracketed paste
-// arrives as a single tea.PasteMsg, not per-rune key presses). The text is
-// flattened to a single line first. It reports whether the text changed.
-func (in *qxInput) paste(s string) bool {
-	ins := []rune(pasteSanitize(s))
-	if len(ins) == 0 {
-		return false
-	}
-	in.text = append(in.text[:in.cursor], append(ins, in.text[in.cursor:]...)...)
-	in.cursor += len(ins)
-	return true
-}
-
-// applySuggestion replaces the identifier token ending at the cursor with s
-// and places the cursor after it.
-func (in *qxInput) applySuggestion(s string) {
+// qxApplySuggestion replaces the identifier token ending at the cursor with
+// s and places the cursor after it.
+func qxApplySuggestion(in *ui.LineInput, s string) {
 	text := in.String()
-	b := in.byteCursor()
+	b := in.ByteCursor()
 	start := b
 	for start > 0 && qxIdentByte(text[start-1]) {
 		start--
 	}
-	head := []rune(text[:start] + s)
-	in.text = append(append([]rune{}, head...), []rune(text[b:])...)
-	in.cursor = len(head)
+	head := text[:start] + s
+	in.Set(head + text[b:])
+	in.SetCursor(len([]rune(head)))
 }
 
 // qxIdentByte mirrors the completer's notion of an identifier byte.
@@ -338,34 +215,6 @@ func qxIdentByte(b byte) bool {
 		('a' <= b && b <= 'z') ||
 		('A' <= b && b <= 'Z') ||
 		('0' <= b && b <= '9')
-}
-
-// view renders the input with a visible cursor cell, horizontally scrolled
-// so the cursor stays inside width w (assumes narrow runes, which holds for
-// SQL text).
-func (in *qxInput) view(w int, th *theme.Theme) string {
-	if w < 2 {
-		w = 2
-	}
-	start := 0
-	if in.cursor > w-1 {
-		start = in.cursor - (w - 1)
-	}
-	before := string(in.text[start:in.cursor])
-	curCh := " "
-	after := ""
-	if in.cursor < len(in.text) {
-		curCh = string(in.text[in.cursor])
-		rest := in.text[in.cursor+1:]
-		if maxAfter := w - (in.cursor - start) - 1; len(rest) > maxAfter {
-			if maxAfter < 0 {
-				maxAfter = 0
-			}
-			rest = rest[:maxAfter]
-		}
-		after = string(rest)
-	}
-	return th.Input.Render(before) + th.Input.Reverse(true).Render(curCh) + th.Input.Render(after)
 }
 
 // --- suggestion list ---------------------------------------------------------

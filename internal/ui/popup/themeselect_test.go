@@ -278,7 +278,7 @@ func TestThemeInputCursorEditing(t *testing.T) {
 	ov, _ = ov.Update(themeKey("left"))
 	ov, _ = themeType(t, ov, "o")
 	got := ov.(*themeSelect)
-	if s := string(got.input); s != "nord" {
+	if s := got.input.String(); s != "nord" {
 		t.Errorf("input = %q, want nord", s)
 	}
 	if len(got.filtered) == 0 || got.filtered[0] != "nord" {
@@ -329,8 +329,8 @@ func TestThemePasteFiltersAndPreviews(t *testing.T) {
 	ts := newThemeSelect("nord", "")
 	ov, cmd := ts.Update(tea.PasteMsg{Content: "dracula"})
 	ts = ov.(*themeSelect)
-	if string(ts.input) != "dracula" {
-		t.Fatalf("input = %q, want dracula", string(ts.input))
+	if ts.input.String() != "dracula" {
+		t.Fatalf("input = %q, want dracula", ts.input.String())
 	}
 	if ts.highlighted() != "dracula" {
 		t.Fatalf("highlighted = %q, want dracula", ts.highlighted())
@@ -350,8 +350,8 @@ func TestThemePasteFiltersAndPreviews(t *testing.T) {
 	ts = newThemeSelect("nord", "")
 	ov, _ = ts.Update(tea.PasteMsg{Content: "gruv\r\nbox"})
 	ts = ov.(*themeSelect)
-	if string(ts.input) != "gruv box" {
-		t.Fatalf("flattened input = %q", string(ts.input))
+	if ts.input.String() != "gruv box" {
+		t.Fatalf("flattened input = %q", ts.input.String())
 	}
 	ov, cmd = ts.Update(tea.PasteMsg{Content: "\r"})
 	if ov != ui.Overlay(ts) || cmd != nil {

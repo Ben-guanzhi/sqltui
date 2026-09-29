@@ -2,6 +2,8 @@ package oraclebe
 
 import (
 	"testing"
+
+	"github.com/LinPr/sqltui/internal/db"
 )
 
 func TestConfigDsn(t *testing.T) {
@@ -115,9 +117,9 @@ func TestQuoteIdent(t *testing.T) {
 		{"SCHEMA.TABLE", "\"SCHEMA.TABLE\""},
 	}
 	for _, tt := range tests {
-		got := quoteIdent(tt.input)
+		got := db.QuoteIdentDouble(tt.input)
 		if got != tt.expected {
-			t.Errorf("quoteIdent(%q) = %q, want %q", tt.input, got, tt.expected)
+			t.Errorf("QuoteIdentDouble(%q) = %q, want %q", tt.input, got, tt.expected)
 		}
 	}
 }
@@ -133,9 +135,9 @@ func TestIndexPriority(t *testing.T) {
 		{"UNKNOWN", 0},
 	}
 	for _, tt := range tests {
-		got := indexPriority(tt.label)
+		got := db.IndexPriority(tt.label)
 		if got != tt.expected {
-			t.Errorf("indexPriority(%q) = %d, want %d", tt.label, got, tt.expected)
+			t.Errorf("IndexPriority(%q) = %d, want %d", tt.label, got, tt.expected)
 		}
 	}
 }
@@ -153,9 +155,9 @@ func TestFormatValue(t *testing.T) {
 		{true, "true"},
 	}
 	for _, tt := range tests {
-		got := formatValue(tt.input)
+		got := db.FormatNativeCell(tt.input)
 		if got != tt.expected {
-			t.Errorf("formatValue(%v) = %q, want %q", tt.input, got, tt.expected)
+			t.Errorf("FormatNativeCell(%v) = %q, want %q", tt.input, got, tt.expected)
 		}
 	}
 }
@@ -180,7 +182,7 @@ func TestBackendCurrentNamespace(t *testing.T) {
 	if got := b.CurrentNamespace(); got != "testdb" {
 		t.Errorf("CurrentNamespace() = %q, want %q", got, "testdb")
 	}
-	
+
 	b2 := &Backend{db: nil}
 	if got := b2.CurrentNamespace(); got != "" {
 		t.Errorf("CurrentNamespace() with nil db = %q, want empty", got)

@@ -68,17 +68,6 @@ func NewDB(dsn string, dbName string) (*DB, error) {
 	return DbClinet, nil
 }
 
-func GetDB() *DB {
-	return DbClinet
-}
-
-func GetDbName() string {
-	if DbClinet == nil {
-		return ""
-	}
-	return DbClinet.dbName
-}
-
 type RawCommandResult struct {
 	Fields  []string
 	Records [][]string
@@ -104,7 +93,7 @@ func (db *DB) RawSqlCommand(query string) (rawCmdResult RawCommandResult, err er
 		default:
 			// INSERT/UPDATE/DELETE ... RETURNING (MariaDB) also produces a
 			// result set that db.Exec would silently discard.
-			rawCmdResult.IsDQL = hasReturningClause(cmd)
+			rawCmdResult.IsDQL = dbapi.HasReturningClause(cmd)
 		}
 	}
 
@@ -114,17 +103,6 @@ func (db *DB) RawSqlCommand(query string) (rawCmdResult RawCommandResult, err er
 	}
 	rawCmdResult.Result, err = db.RawExec(query)
 	return rawCmdResult, err
-}
-
-// hasReturningClause reports whether the statement contains a RETURNING
-// clause, whose result set would be silently discarded by db.Exec.
-func hasReturningClause(words []string) bool {
-	for _, word := range words[1:] {
-		if strings.EqualFold(word, "returning") {
-			return true
-		}
-	}
-	return false
 }
 
 func (db *DB) RawQuery(query string) (fields []string, records [][]string, err error) {
@@ -140,7 +118,7 @@ func (db *DB) RawQuery(query string) (fields []string, records [][]string, err e
 		return nil, nil, err
 	}
 
-	records, err = readRecords(rows)
+	records, err = dbapi.ReadRawBytesRows(rows)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -179,7 +157,7 @@ func (db *DB) ShowDatabases() ([]string, error) {
 func (db *DB) ShowDatabaseTables(database string) ([]string, error) {
 	query := "show tables"
 	if database != "" {
-		query = "show tables from " + quoteIdent(database)
+		query = "show tables from " + dbapi.QuoteIdentBacktick(database)
 	}
 
 	rows, err := db.Query(query)
@@ -204,14 +182,14 @@ func (db *DB) ShowCurrentDatabaseTables() ([]string, error) {
 }
 
 func (db *DB) FetchTableFields(table string) ([]string, error) {
-	query := fmt.Sprintf("describe %s", quoteIdent(table))
+	query := fmt.Sprintf("describe %s", dbapi.QuoteIdentBacktick(table))
 	rows, err := db.Query(query)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	records, err := readRecords(rows)
+	records, err := dbapi.ReadRawBytesRows(rows)
 	if err != nil {
 		return nil, err
 	}
@@ -224,14 +202,14 @@ func (db *DB) FetchTableFields(table string) ([]string, error) {
 }
 
 func (db *DB) FetchTableRecords(table string) ([][]string, error) {
-	query := fmt.Sprintf("select * from %s limit %d", quoteIdent(table), FetchLimit)
+	query := fmt.Sprintf("select * from %s limit %d", dbapi.QuoteIdentBacktick(table), FetchLimit)
 	rows, err := db.Query(query)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	records, err := readRecords(rows)
+	records, err := dbapi.ReadRawBytesRows(rows)
 	if err != nil {
 		return nil, err
 	}
@@ -339,52 +317,9 @@ func (db *DB) ColumnIndexTypes(database, table string) (map[string]string, error
 			label = "UNIQUE"
 		}
 		// Only set if not already set by a higher-priority index
-		if existing, ok := result[colName]; !ok || indexPriority(existing) < indexPriority(label) {
+		if existing, ok := result[colName]; !ok || dbapi.IndexPriority(existing) < dbapi.IndexPriority(label) {
 			result[colName] = label
 		}
 	}
 	return result, rows.Err()
-}
-
-func indexPriority(label string) int {
-	switch label {
-	case "PK":
-		return 3
-	case "UNIQUE":
-		return 2
-	case "INDEX":
-		return 1
-	}
-	return 0
-}
-
-// quoteIdent quotes a mysql identifier with backticks, doubling any
-// embedded backtick.
-func quoteIdent(name string) string {
-	return "`" + strings.ReplaceAll(name, "`", "``") + "`"
-}
-
-func readRecords(rows *sql.Rows) ([][]string, error) {
-	columns, err := rows.Columns()
-	if err != nil {
-		return nil, err
-	}
-	var records [][]string
-	for rows.Next() {
-		record := make([]any, len(columns))
-		for i := range columns {
-			record[i] = &sql.RawBytes{}
-		}
-
-		if err = rows.Scan(record...); err != nil {
-			return nil, err
-		}
-		var currentRow []string
-		for _, rawValue := range record {
-			field := string(*rawValue.(*sql.RawBytes))
-			currentRow = append(currentRow, field)
-		}
-		records = append(records, currentRow)
-	}
-	return records, rows.Err()
 }

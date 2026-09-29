@@ -195,11 +195,11 @@ func TestSplitTableArg(t *testing.T) {
 	}
 }
 
-// TestRunRejectsUnknownKind guards the Run entry point. sqlite is no longer
-// a database-mode kind (sqlite files are opened through file mode) and must
-// be rejected with a clear error like any other unknown kind.
+// TestRunRejectsUnknownKind guards the Run entry point. sqlite (and any
+// other name outside the kind table) is not a database-mode kind and must be
+// rejected with a clear error without starting the UI.
 func TestRunRejectsUnknownKind(t *testing.T) {
-	for _, kind := range []string{"oracle", "sqlite"} {
+	for _, kind := range []string{"sqlite", "not-a-db"} {
 		err := Run(kind)
 		if err == nil {
 			t.Fatalf("expected error for kind %q", kind)

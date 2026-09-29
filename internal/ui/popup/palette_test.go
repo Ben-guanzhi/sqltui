@@ -146,7 +146,7 @@ func TestPaletteAliasSpaceDispatchesImmediately(t *testing.T) {
 		if cmd == nil {
 			t.Fatalf("typing %q + space produced no command", alias)
 		}
-		if got := string(p.input); got != alias {
+		if got := p.input.String(); got != alias {
 			t.Fatalf("input mutated on dispatch: %q", got)
 		}
 		_ = want
@@ -158,8 +158,8 @@ func TestPaletteAliasSpaceDispatchesImmediately(t *testing.T) {
 	if cmd != nil {
 		t.Fatal("'x ' should not dispatch")
 	}
-	if string(p.input) != "x " {
-		t.Fatalf("input = %q, want %q", string(p.input), "x ")
+	if p.input.String() != "x " {
+		t.Fatalf("input = %q, want %q", p.input.String(), "x ")
 	}
 }
 
@@ -177,16 +177,16 @@ func TestPaletteEditingKeys(t *testing.T) {
 	typeString(t, p, "abc")
 	p.Update(keyPress("left"))
 	p.Update(keyPress("backspace")) // deletes 'b'
-	if string(p.input) != "ac" || p.cursor != 1 {
-		t.Fatalf("after edits input=%q cursor=%d, want ac/1", string(p.input), p.cursor)
+	if p.input.String() != "ac" || p.input.Cursor() != 1 {
+		t.Fatalf("after edits input=%q cursor=%d, want ac/1", p.input.String(), p.input.Cursor())
 	}
 	typeString(t, p, "X") // insert at cursor
-	if string(p.input) != "aXc" {
-		t.Fatalf("mid insert got %q, want aXc", string(p.input))
+	if p.input.String() != "aXc" {
+		t.Fatalf("mid insert got %q, want aXc", p.input.String())
 	}
 	p.Update(tea.KeyPressMsg{Code: 'u', Mod: tea.ModCtrl}) // kill to start
-	if string(p.input) != "c" || p.cursor != 0 {
-		t.Fatalf("ctrl+u got %q cursor=%d", string(p.input), p.cursor)
+	if p.input.String() != "c" || p.input.Cursor() != 0 {
+		t.Fatalf("ctrl+u got %q cursor=%d", p.input.String(), p.input.Cursor())
 	}
 }
 
@@ -244,8 +244,8 @@ func TestPalettePaste(t *testing.T) {
 	if ov != ui.Overlay(p) || cmd != nil {
 		t.Fatal("paste must not replace the overlay or dispatch")
 	}
-	if string(p.input) != "theme" {
-		t.Fatalf("input = %q, want theme", string(p.input))
+	if p.input.String() != "theme" {
+		t.Fatalf("input = %q, want theme", p.input.String())
 	}
 	if len(p.filtered) == 0 || Commands[p.filtered[0]].Name != "theme" {
 		t.Fatalf("filter after paste: %v", p.filtered)
@@ -254,8 +254,8 @@ func TestPalettePaste(t *testing.T) {
 	// Newlines and CR are flattened to spaces.
 	p = newPalette("")
 	p.Update(tea.PasteMsg{Content: "filter\r\nage > 1"})
-	if string(p.input) != "filter age > 1" {
-		t.Fatalf("flattened input = %q", string(p.input))
+	if p.input.String() != "filter age > 1" {
+		t.Fatalf("flattened input = %q", p.input.String())
 	}
 
 	// Pasting a space after a single-letter alias must NOT trigger the
@@ -265,15 +265,15 @@ func TestPalettePaste(t *testing.T) {
 	if cmd != nil {
 		t.Fatal("paste dispatched a command")
 	}
-	if string(p.input) != "q select 1" {
-		t.Fatalf("input = %q, want %q", string(p.input), "q select 1")
+	if p.input.String() != "q select 1" {
+		t.Fatalf("input = %q, want %q", p.input.String(), "q select 1")
 	}
 
 	// Empty paste is a no-op.
 	p = newPalette("x")
-	p.cursor = 0
+	p.input.SetCursor(0)
 	p.Update(tea.PasteMsg{Content: "\r"})
-	if string(p.input) != "x" || p.cursor != 0 {
-		t.Fatalf("empty paste changed state: %q cursor %d", string(p.input), p.cursor)
+	if p.input.String() != "x" || p.input.Cursor() != 0 {
+		t.Fatalf("empty paste changed state: %q cursor %d", p.input.String(), p.input.Cursor())
 	}
 }

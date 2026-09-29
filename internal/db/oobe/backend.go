@@ -22,14 +22,19 @@ type Config struct {
 type Backend struct {
 	cfg       Config
 	client    *httpClient
-	timeRange int // query time range in minutes, default 15
-	page      int // current 0-based page index
+	timeRange int   // query time range in minutes, default 15
+	page      int   // current 0-based page index
 	pageSize  int   // rows per page, default 200
 	startUS   int64 // cached query window start (microseconds); 0 = not yet initialized
 	endUS     int64 // cached query window end (microseconds)
 }
 
-var _ db.Backend = (*Backend)(nil)
+var (
+	_ db.Backend            = (*Backend)(nil)
+	_ db.QueryParamsSetter  = (*Backend)(nil)
+	_ db.TimeWindowResetter = (*Backend)(nil)
+	_ db.Namespaced         = (*Backend)(nil)
+)
 
 // Connect creates a Backend and verifies connectivity by listing namespaces.
 func Connect(cfg Config) (*Backend, error) {

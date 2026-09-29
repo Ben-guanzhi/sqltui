@@ -295,9 +295,13 @@ func TestHeaderEmphasizesCursoredColumnBothModes(t *testing.T) {
 		} else {
 			tv.modeSet = true // pin fit mode
 		}
+		// Header emphasis is driven by RenderOpts.HeaderCur, which the app
+		// feeds from ColCursor on every render.
 		o := RenderOpts{Width: 60, Height: 10, Theme: th}
+		o.HeaderCur = tv.ColCursor()
 		before := tv.Render(f, o)
 		tv.NextCol(f.NumCols())
+		o.HeaderCur = tv.ColCursor()
 		after := tv.Render(f, o)
 		if before == after {
 			t.Errorf("expanded=%v: moving the column cursor must change the header emphasis", expanded)
