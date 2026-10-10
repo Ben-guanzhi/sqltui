@@ -68,8 +68,6 @@ func sheetKeyEntryHeight(f *data.Frame, field, keyW int) int {
 
 // sheetKeyLineOffset returns the left-list line index where the given field's
 // entry begins (the sum of entry heights of all preceding fields).
-// sheetKeyEntryHeights precomputes all entry heights for a frame+keyW pair;
-// callers that need offsets for many fields should precompute once.
 func sheetKeyLineOffset(f *data.Frame, field, keyW int) int {
 	if f == nil || field <= 0 {
 		return 0
@@ -79,21 +77,6 @@ func sheetKeyLineOffset(f *data.Frame, field, keyW int) int {
 		n += sheetKeyEntryHeight(f, c, keyW)
 	}
 	return n
-}
-
-// sheetKeyEntryHeights returns a prefix-sum array of entry heights for all
-// fields at a given keyW. he[i] is the total number of left-list lines
-// occupied by fields [0, i). he[0] is always 0.
-func sheetKeyEntryHeights(f *data.Frame, keyW int) []int {
-	if f == nil {
-		return nil
-	}
-	n := f.NumCols()
-	he := make([]int, n+1)
-	for c := 0; c < n; c++ {
-		he[c+1] = he[c] + sheetKeyEntryHeight(f, c, keyW)
-	}
-	return he
 }
 
 // sheetKeyLineCount reports the total left-list line count across all fields.
@@ -243,22 +226,30 @@ func sheetBodyEntryHeightCols(f *data.Frame, cols []int, pos, dataRow, keyW, val
 	return kh
 }
 
+// sheetBodyEntryHeightsCols returns a prefix-sum array of body line counts for
+// every matched entry at dataRow. h[i] is the body line index where entry i
+// starts (the sum of entry heights of entries [0, i)); h[len(cols)] is the
+// total body line count. One Θ(m) scan replaces repeated Θ(m) recomputation
+// of count+offset on the same frame/row (SICP ch3 memoized single pass).
+func sheetBodyEntryHeightsCols(f *data.Frame, cols []int, dataRow, keyW, valW int) []int {
+	h := make([]int, len(cols)+1)
+	for pos := range cols {
+		h[pos+1] = h[pos] + sheetBodyEntryHeightCols(f, cols, pos, dataRow, keyW, valW)
+	}
+	return h
+}
+
 // sheetBodyLineCountCols sums body entry heights across all matched entries.
 func sheetBodyLineCountCols(f *data.Frame, cols []int, dataRow, keyW, valW int) int {
-	n := 0
-	for pos := range cols {
-		n += sheetBodyEntryHeightCols(f, cols, pos, dataRow, keyW, valW)
-	}
-	return n
+	return sheetBodyEntryHeightsCols(f, cols, dataRow, keyW, valW)[len(cols)]
 }
 
 // sheetBodyLineOffsetCols returns the body line index where entry at pos starts.
 func sheetBodyLineOffsetCols(f *data.Frame, cols []int, pos, dataRow, keyW, valW int) int {
-	n := 0
-	for c := 0; c < pos && c < len(cols); c++ {
-		n += sheetBodyEntryHeightCols(f, cols, c, dataRow, keyW, valW)
+	if pos <= 0 {
+		return 0
 	}
-	return n
+	return sheetBodyEntryHeightsCols(f, cols, dataRow, keyW, valW)[pos]
 }
 
 // sheetKeyListCols renders the matched columns' key names as wrapped lines,

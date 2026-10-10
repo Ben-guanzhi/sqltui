@@ -735,9 +735,12 @@ func (a *App) edgeFollowSheet(f *data.Frame, p *Pane) {
 		visible = 1
 	}
 	dataRow := p.Table.Sel()
-	maxOff := max(0, sheetBodyLineCountCols(f, matched, dataRow, keyW, valW)-visible)
-	curStart := sheetBodyLineOffsetCols(f, matched, p.SheetField, dataRow, keyW, valW)
-	curEnd := curStart + sheetBodyEntryHeightCols(f, matched, p.SheetField, dataRow, keyW, valW) - 1
+	// 单次 Θ(m) 扫描构建前缀和，count/offset/end 全部 O(1)（SICP 记忆化）。
+	heights := sheetBodyEntryHeightsCols(f, matched, dataRow, keyW, valW)
+	total := heights[len(matched)]
+	curStart := heights[p.SheetField]
+	curEnd := heights[p.SheetField+1] - 1
+	maxOff := max(0, total-visible)
 	if curStart < p.SheetOff {
 		p.SheetOff = curStart
 	} else if curEnd >= p.SheetOff+visible {
