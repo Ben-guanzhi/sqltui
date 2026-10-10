@@ -133,20 +133,20 @@ func detectFwfSpans(lines []string) [][2]int {
 }
 
 // fwfFields slices one line into trimmed fields; spans entirely beyond the
-// end of the line yield nil.
+// end of the line yield nil. Byte-oriented: spans are byte offsets so we
+// slice the string directly (FWF columns are byte-aligned by definition).
 func fwfFields(line string, spans [][2]int) []any {
-	runes := []rune(line)
 	fields := make([]any, len(spans))
 	for i, sp := range spans {
 		start, end := sp[0], sp[1]
-		if start >= len(runes) {
+		if start >= len(line) {
 			fields[i] = nil
 			continue
 		}
-		if end > len(runes) {
-			end = len(runes)
+		if end > len(line) {
+			end = len(line)
 		}
-		fields[i] = strings.TrimSpace(string(runes[start:end]))
+		fields[i] = strings.TrimSpace(line[start:end])
 	}
 	return fields
 }

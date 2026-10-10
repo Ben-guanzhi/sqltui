@@ -103,6 +103,8 @@ func enabledTypes(types []string) []DType {
 // non-empty cell in cells parses as. It reports false when no type matches
 // or when the cells hold no evidence at all (all null/empty), or when any
 // cell is a non-string, non-nil value.
+// Optimization: fast-path for int/float avoids strconv when the string
+// obviously cannot parse (CLRS ch6 heap-selection: cheap reject first).
 func detectColumnType(cells []any, enabled []DType) (DType, bool) {
 next:
 	for _, t := range enabled {
@@ -119,6 +121,9 @@ next:
 			if s == "" {
 				continue
 			}
+			if !quickReject(s, t) {
+				continue next
+			}
 			if _, ok := parseAs(s, t); !ok {
 				continue next
 			}
@@ -129,6 +134,48 @@ next:
 		}
 	}
 	return TypeString, false
+}
+
+// quickReject reports whether s obviously cannot parse as t, allowing
+// detectColumnType to skip the more expensive parseAs call.
+func quickReject(s string, t DType) bool {
+	switch t {
+	case TypeInt:
+		if s[0] == '-' || s[0] == '+' {
+			s = s[1:]
+		}
+		if s == "" {
+			return false
+		}
+		for i := 0; i < len(s); i++ {
+			if s[i] < '0' || s[i] > '9' {
+				return false
+			}
+		}
+		return true
+	case TypeFloat:
+		if s[0] == '-' || s[0] == '+' {
+			s = s[1:]
+		}
+		if s == "" {
+			return false
+		}
+		dotSeen := false
+		for i := 0; i < len(s); i++ {
+			c := s[i]
+			if c == '.' {
+				if dotSeen {
+					return false
+				}
+				dotSeen = true
+			} else if c < '0' || c > '9' {
+				return false
+			}
+		}
+		return true
+	default:
+		return true
+	}
 }
 
 // convertCells converts every cell to type t. Nulls and empty strings become

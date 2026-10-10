@@ -68,6 +68,8 @@ func sheetKeyEntryHeight(f *data.Frame, field, keyW int) int {
 
 // sheetKeyLineOffset returns the left-list line index where the given field's
 // entry begins (the sum of entry heights of all preceding fields).
+// sheetKeyEntryHeights precomputes all entry heights for a frame+keyW pair;
+// callers that need offsets for many fields should precompute once.
 func sheetKeyLineOffset(f *data.Frame, field, keyW int) int {
 	if f == nil || field <= 0 {
 		return 0
@@ -77,6 +79,21 @@ func sheetKeyLineOffset(f *data.Frame, field, keyW int) int {
 		n += sheetKeyEntryHeight(f, c, keyW)
 	}
 	return n
+}
+
+// sheetKeyEntryHeights returns a prefix-sum array of entry heights for all
+// fields at a given keyW. he[i] is the total number of left-list lines
+// occupied by fields [0, i). he[0] is always 0.
+func sheetKeyEntryHeights(f *data.Frame, keyW int) []int {
+	if f == nil {
+		return nil
+	}
+	n := f.NumCols()
+	he := make([]int, n+1)
+	for c := 0; c < n; c++ {
+		he[c+1] = he[c] + sheetKeyEntryHeight(f, c, keyW)
+	}
+	return he
 }
 
 // sheetKeyLineCount reports the total left-list line count across all fields.
