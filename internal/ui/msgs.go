@@ -37,6 +37,11 @@ type ApplyFrameMsg struct {
 	// TableCols, when non-nil, limits which column indices the table view
 	// renders. Sheet/row-detail mode always shows all columns.
 	TableCols []int
+	// SourceNamespace/SourceTable, set together when opening a new tab from
+	// a live table fetch, record the table the base frame came from (see
+	// Pane's source fields and App.TableSource).
+	SourceNamespace string
+	SourceTable     string
 }
 
 // ReplaceBaseMsg swaps the base frame of the pane identified by PaneID

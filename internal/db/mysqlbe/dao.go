@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
-	"sync"
 
 	_ "github.com/go-sql-driver/mysql"
 
@@ -28,14 +27,6 @@ const (
 	FetchLimit = 200
 )
 
-var (
-	DbClinet *DB
-	// clientMu serializes the check-close-assign swap of DbClinet: dial
-	// commands run in goroutines and two overlapping reconnects must not
-	// race on the global client.
-	clientMu sync.Mutex
-)
-
 type DB struct {
 	*sql.DB
 	dsn    string
@@ -53,19 +44,11 @@ func NewDB(dsn string, dbName string) (*DB, error) {
 		return nil, err
 	}
 
-	clientMu.Lock()
-	defer clientMu.Unlock()
-	// close the previous connection when re-connecting
-	if DbClinet != nil {
-		DbClinet.DB.Close()
-	}
-
-	DbClinet = &DB{
+	return &DB{
 		DB:     dbc,
 		dsn:    dsn,
 		dbName: dbName,
-	}
-	return DbClinet, nil
+	}, nil
 }
 
 type RawCommandResult struct {

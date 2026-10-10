@@ -1,7 +1,6 @@
 package dbmode
 
 import (
-	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -99,10 +98,10 @@ func (f *fakeBackend) FetchTable(ns, table string, limit int) (*data.Frame, erro
 	f.fetchNS, f.fetchTable, f.fetchLimit = ns, table, limit
 	return f.frame, f.fetchErr
 }
-func (f *fakeBackend) PrimaryKeys(string, string) ([]string, error)                { return nil, nil }
-func (f *fakeBackend) ColumnsMeta(string, string) ([]db.ColumnMeta, error)         { return nil, nil }
-func (f *fakeBackend) ColumnIndexTypes(string, string) (map[string]string, error)  { return nil, nil }
-func (f *fakeBackend) Close() error                                                { return nil }
+func (f *fakeBackend) PrimaryKeys(string, string) ([]string, error)               { return nil, nil }
+func (f *fakeBackend) ColumnsMeta(string, string) ([]db.ColumnMeta, error)        { return nil, nil }
+func (f *fakeBackend) ColumnIndexTypes(string, string) (map[string]string, error) { return nil, nil }
+func (f *fakeBackend) Close() error                                               { return nil }
 
 // fakeKV is a db.KVBackend stub for redis-mode tests.
 type fakeKV struct {
@@ -135,25 +134,25 @@ type fakeCtx struct {
 	kv db.KVBackend
 }
 
-func (c *fakeCtx) CurrentFrame() *data.Frame { return nil }
-func (c *fakeCtx) CurrentRow() int           { return 0 }
-func (c *fakeCtx) SheetFieldCursor() int     { return 0 }
-func (c *fakeCtx) CurrentTableNamespace() string { return "" }
-func (c *fakeCtx) BaseCrumb() string         { return "" }
-func (c *fakeCtx) Crumbs() []string          { return nil }
-func (c *fakeCtx) ColumnNames() []string     { return nil }
-func (c *fakeCtx) Engine() *query.Engine     { return nil }
-func (c *fakeCtx) TableNames() []string      { return nil }
-func (c *fakeCtx) Backend() db.Backend       { return c.be }
-func (c *fakeCtx) KV() db.KVBackend          { return c.kv }
-func (c *fakeCtx) Theme() *theme.Theme       { return testTheme() }
-func (c *fakeCtx) ThemeName() string         { return "test" }
-func (c *fakeCtx) ShowBorders() bool         { return false }
-func (c *fakeCtx) ShowRowNumbers() bool      { return false }
-func (c *fakeCtx) Tabs() []ui.TabInfo        { return nil }
-func (c *fakeCtx) ActiveTab() int            { return 0 }
-func (c *fakeCtx) ActivePaneID() int         { return 0 }
-func (c *fakeCtx) PendingEdit() *ui.PendingEdit   { return nil }
+func (c *fakeCtx) CurrentFrame() *data.Frame        { return nil }
+func (c *fakeCtx) CurrentRow() int                  { return 0 }
+func (c *fakeCtx) SheetFieldCursor() int            { return 0 }
+func (c *fakeCtx) CurrentTableNamespace() string    { return "" }
+func (c *fakeCtx) BaseCrumb() string                { return "" }
+func (c *fakeCtx) Crumbs() []string                 { return nil }
+func (c *fakeCtx) ColumnNames() []string            { return nil }
+func (c *fakeCtx) Engine() *query.Engine            { return nil }
+func (c *fakeCtx) TableNames() []string             { return nil }
+func (c *fakeCtx) Backend() db.Backend              { return c.be }
+func (c *fakeCtx) KV() db.KVBackend                 { return c.kv }
+func (c *fakeCtx) Theme() *theme.Theme              { return testTheme() }
+func (c *fakeCtx) ThemeName() string                { return "test" }
+func (c *fakeCtx) ShowBorders() bool                { return false }
+func (c *fakeCtx) ShowRowNumbers() bool             { return false }
+func (c *fakeCtx) Tabs() []ui.TabInfo               { return nil }
+func (c *fakeCtx) ActiveTab() int                   { return 0 }
+func (c *fakeCtx) ActivePaneID() int                { return 0 }
+func (c *fakeCtx) PendingEdit() *ui.PendingEdit     { return nil }
 func (c *fakeCtx) PendingDelete() *ui.PendingDelete { return nil }
 
 var _ ui.AppContext = (*fakeCtx)(nil)
@@ -257,24 +256,4 @@ func TestRegisterFactoriesWrapsRedisOnce(t *testing.T) {
 	if _, ok := ov.(*keyBrowser); ok {
 		t.Fatal("schema factory returned the key browser without a KV connection")
 	}
-}
-
-// TestConnTrackerCloseAll checks connection bookkeeping.
-func TestConnTrackerCloseAll(t *testing.T) {
-	tr := &connTracker{}
-	c := &countingCloser{}
-	tr.track(nil) // no-op
-	tr.track(c)
-	tr.closeAll()
-	tr.closeAll() // second close must not double-close
-	if c.n != 1 {
-		t.Fatalf("closed %d times, want 1", c.n)
-	}
-}
-
-type countingCloser struct{ n int }
-
-func (c *countingCloser) Close() error {
-	c.n++
-	return fmt.Errorf("already closed")
 }

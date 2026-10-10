@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"reflect"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -191,4 +192,89 @@ func TestSearchFuzzyCrumb(t *testing.T) {
 	if got.NumRows() != 1 || got.CellString(0, 0) != "carol" {
 		t.Fatalf("fuzzy result wrong: %d rows", got.NumRows())
 	}
+}
+
+// colsFrame 的 name 列大小写混杂，city 列藏着 "berlin" 之外的陷阱词。
+func colsFrame() *data.Frame {
+	f := data.New("name", "city")
+	f.AppendRow([]any{"Alice", "amsterdam"})
+	f.AppendRow([]any{"BOB", "berlin"})
+	f.AppendRow([]any{"carol", "Zürich 客户"})
+	f.AppendRow([]any{"Customer_Name 42", "rome"})
+	return f
+}
+
+// TestSearchColsLivePath 钉住接了缓存的那条路（searchCols 非空）：
+// 逐键的预览都必须等于 data.SearchExactCols 的参考结果，且只搜被选中的列。
+func TestSearchColsLivePath(t *testing.T) {
+	f := colsFrame()
+	keys := []string{"a", "l", "i", "c", "e", "z", "z", "客", "户", "N", "A", "M", "E", " ", "ü"}
+	for _, cols := range [][]int{{0}, {1}, {0, 1}} {
+		var s SearchBar
+		s.StartCols(f, false, cols)
+		q := ""
+		for i, k := range keys {
+			q += k
+			s.Type(k)
+			want := data.SearchExactCols(f, cols, q)
+			got := s.Preview()
+			if got.NumRows() != len(want) {
+				t.Fatalf("cols=%v 第%d键 query=%q：预览 %d 行，参考 %d 行", cols, i, q, got.NumRows(), len(want))
+			}
+			for j, r := range want {
+				if got.CellString(j, 0) != f.CellString(r, 0) {
+					t.Fatalf("cols=%v query=%q 第%d行身份不对：got=%q want=%q", cols, q, j, got.CellString(j, 0), f.CellString(r, 0))
+				}
+			}
+		}
+		// 只搜 cols 之外的列时，命中集合必须随之收窄（防接线传错 cols）。
+		s.Cancel()
+		s.StartCols(f, false, []int{0})
+		s.Type("amsterdam")
+		if s.Preview().NumRows() != 0 {
+			t.Fatalf("city 列的词不该在 name 列命中")
+		}
+	}
+}
+
+// TestSearchFoldCacheLifecycle 缓存随会话生灭：连打几键后必须还在（跨按键复用生效的
+// 唯一可观测证据——builds 是包内私有的，ui 侧只能看 FoldCache 是否非零），
+// Cancel/Commit 之后必须清空（大帧的小写串不能滞留）。
+func TestSearchFoldCacheLifecycle(t *testing.T) {
+	f := colsFrame()
+	var s SearchBar
+	s.StartCols(f, false, []int{0, 1})
+	if !reflect.DeepEqual(s.fold, data.FoldCache{}) {
+		t.Fatal("刚 Start 就有缓存料")
+	}
+	s.Type("ali")
+	s.Type("ce")
+	if reflect.DeepEqual(s.fold, data.FoldCache{}) {
+		t.Fatal("打了三个键缓存还是空的——缓存没挂进 recompute，本轮优化没落地")
+	}
+	s.Cancel()
+	if !reflect.DeepEqual(s.fold, data.FoldCache{}) {
+		t.Fatal("Cancel 后必须释放缓存")
+	}
+
+	// 换一帧重开：旧帧的缓存不能带进新会话。
+	s.StartCols(f, false, []int{0, 1})
+	s.Type("zzz")
+	if reflect.DeepEqual(s.fold, data.FoldCache{}) {
+		t.Fatal("第二个会话没建自己的缓存")
+	}
+	if _, _, ok := s.Commit(); !ok {
+		t.Fatal("commit 应成功")
+	}
+	if !reflect.DeepEqual(s.fold, data.FoldCache{}) {
+		t.Fatal("Commit 后必须释放缓存")
+	}
+
+	// 全列搜索（searchCols 为 nil）不走这条路，也必须保持空缓存。
+	s.Start(f, false)
+	s.Type("bob")
+	if !reflect.DeepEqual(s.fold, data.FoldCache{}) {
+		t.Fatal("未限定列时不该建列缓存")
+	}
+	s.Cancel()
 }

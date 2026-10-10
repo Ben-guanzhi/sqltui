@@ -85,14 +85,14 @@ func TestSQLiteFileReader(t *testing.T) {
 		if f.Columns[i].Type != want.dtype {
 			t.Errorf("column %q type = %v, want %v", f.Columns[i].Name, f.Columns[i].Type, want.dtype)
 		}
-		if !reflect.DeepEqual(f.Columns[i].Cells, want.cells) {
-			t.Errorf("column %q cells = %#v, want %#v", f.Columns[i].Name, f.Columns[i].Cells, want.cells)
+		if !reflect.DeepEqual(f.Columns[i].Values(), want.cells) {
+			t.Errorf("column %q cells = %#v, want %#v", f.Columns[i].Name, f.Columns[i].Values(), want.cells)
 		}
 	}
 
 	pets := frames[1].Frame
-	if want := []any{"rex"}; !reflect.DeepEqual(pets.Columns[0].Cells, want) {
-		t.Errorf("pets cells = %#v, want %#v", pets.Columns[0].Cells, want)
+	if want := []any{"rex"}; !reflect.DeepEqual(pets.Columns[0].Values(), want) {
+		t.Errorf("pets cells = %#v, want %#v", pets.Columns[0].Values(), want)
 	}
 }
 

@@ -142,3 +142,10 @@ func TestRunEmptyStatement(t *testing.T) {
 		t.Fatal("expected error for empty statement")
 	}
 }
+
+func TestTableTarget(t *testing.T) {
+	b := &Backend{}
+	if got := b.TableTarget("anything", "orders"); got != `"orders"` {
+		t.Errorf("target = %s, want \"orders\" (namespace ignored)", got)
+	}
+}

@@ -12,7 +12,7 @@ import (
 // strCol builds a string-typed column from literal cell values; "␀" markers
 // are not used — pass nil directly via anySlice.
 func strCol(name string, cells ...any) Column {
-	return Column{Name: name, Type: TypeString, Cells: cells}
+	return Column{Name: name, Type: TypeString, cells: cells}
 }
 
 func frameOf(cols ...Column) *Frame { return &Frame{Columns: cols} }
@@ -101,12 +101,12 @@ func TestInferFrameSafe(t *testing.T) {
 			if c.Type != tt.wantType {
 				t.Fatalf("type = %v, want %v", c.Type, tt.wantType)
 			}
-			if len(c.Cells) != len(tt.wantCells) {
-				t.Fatalf("len = %d, want %d", len(c.Cells), len(tt.wantCells))
+			if len(c.cells) != len(tt.wantCells) {
+				t.Fatalf("len = %d, want %d", len(c.cells), len(tt.wantCells))
 			}
-			for i := range c.Cells {
-				if !cellEqual(c.Cells[i], tt.wantCells[i]) {
-					t.Errorf("cell[%d] = %#v, want %#v", i, c.Cells[i], tt.wantCells[i])
+			for i := range c.cells {
+				if !cellEqual(c.cells[i], tt.wantCells[i]) {
+					t.Errorf("cell[%d] = %#v, want %#v", i, c.cells[i], tt.wantCells[i])
 				}
 			}
 			// input must be untouched
@@ -130,11 +130,11 @@ func TestInferFrameFastNullOnFailure(t *testing.T) {
 	if c.Type != TypeInt {
 		t.Fatalf("type = %v, want TypeInt", c.Type)
 	}
-	if c.Cells[inferSampleRows] != nil {
-		t.Errorf("unparsable cell = %#v, want nil", c.Cells[inferSampleRows])
+	if c.cells[inferSampleRows] != nil {
+		t.Errorf("unparsable cell = %#v, want nil", c.cells[inferSampleRows])
 	}
-	if c.Cells[inferSampleRows+1] != int64(42) {
-		t.Errorf("last cell = %#v, want 42", c.Cells[inferSampleRows+1])
+	if c.cells[inferSampleRows+1] != int64(42) {
+		t.Errorf("last cell = %#v, want 42", c.cells[inferSampleRows+1])
 	}
 }
 
@@ -164,7 +164,7 @@ func TestInferFrameNoMode(t *testing.T) {
 }
 
 func TestInferFrameSkipsTypedColumns(t *testing.T) {
-	col := Column{Name: "n", Type: TypeInt, Cells: []any{int64(1)}}
+	col := Column{Name: "n", Type: TypeInt, cells: []any{int64(1)}}
 	out := InferFrame(frameOf(col), "safe", []string{"all"})
 	if out.Columns[0].Type != TypeInt {
 		t.Errorf("typed column changed to %v", out.Columns[0].Type)

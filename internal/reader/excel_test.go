@@ -95,8 +95,8 @@ func TestExcelSingleSheet(t *testing.T) {
 		if f.Columns[i].Type != want.dtype {
 			t.Errorf("column %d type = %v, want %v", i, f.Columns[i].Type, want.dtype)
 		}
-		if !reflect.DeepEqual(f.Columns[i].Cells, want.cells) {
-			t.Errorf("column %d cells = %#v, want %#v", i, f.Columns[i].Cells, want.cells)
+		if !reflect.DeepEqual(f.Columns[i].Values(), want.cells) {
+			t.Errorf("column %d cells = %#v, want %#v", i, f.Columns[i].Values(), want.cells)
 		}
 	}
 }
@@ -117,8 +117,8 @@ func TestExcelMultiSheet(t *testing.T) {
 	if want := []string{"k"}; !reflect.DeepEqual(extra.ColumnNames(), want) {
 		t.Errorf("Extra columns = %v, want %v", extra.ColumnNames(), want)
 	}
-	if want := []any{"v"}; !reflect.DeepEqual(extra.Columns[0].Cells, want) {
-		t.Errorf("Extra cells = %#v, want %#v", extra.Columns[0].Cells, want)
+	if want := []any{"v"}; !reflect.DeepEqual(extra.Columns[0].Values(), want) {
+		t.Errorf("Extra cells = %#v, want %#v", extra.Columns[0].Values(), want)
 	}
 }
 
@@ -140,7 +140,7 @@ func TestExcelNoHeader(t *testing.T) {
 	if f.Columns[1].Type != data.TypeString {
 		t.Errorf("column 2 type = %v, want string", f.Columns[1].Type)
 	}
-	if got := f.Columns[1].Cells[0]; got != "age" {
+	if got := f.Cell(0, 1); got != "age" {
 		t.Errorf("first cell of column 2 = %#v, want \"age\"", got)
 	}
 }

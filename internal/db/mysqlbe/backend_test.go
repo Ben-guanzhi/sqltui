@@ -126,3 +126,16 @@ func TestColumnsMetaWithoutConnection(t *testing.T) {
 		t.Fatalf("expected error from ColumnsMeta with no connection, got cols=%v", cols)
 	}
 }
+
+func TestTableTarget(t *testing.T) {
+	b := &Backend{}
+	if got := b.TableTarget("shop", "orders"); got != "`shop`.`orders`" {
+		t.Errorf("qualified = %s, want '`shop'`.`orders`", got)
+	}
+	if got := b.TableTarget("", "orders"); got != "`orders`" {
+		t.Errorf("bare = %s, want '`orders`'", got)
+	}
+	if got := b.TableTarget("shop", "we`ird"); got != "`shop`.`we``ird`" {
+		t.Errorf("escaped = %s, want backtick-doubled", got)
+	}
+}

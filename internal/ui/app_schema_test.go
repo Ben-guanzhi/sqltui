@@ -13,8 +13,8 @@ import (
 // scFrame builds a small two-column frame.
 func scFrame() *data.Frame {
 	return &data.Frame{Columns: []data.Column{
-		{Name: "name", Type: data.TypeString, Cells: []any{"a", "b"}},
-		{Name: "age", Type: data.TypeInt, Cells: []any{int64(1), int64(2)}},
+		data.NewColumn("name", data.TypeString, []any{"a", "b"}),
+		data.NewColumn("age", data.TypeInt, []any{int64(1), int64(2)}),
 	}}
 }
 
@@ -46,7 +46,7 @@ func (b *scCountingBackend) FetchTable(ns, table string, limit int) (*data.Frame
 		{Name: "label", Type: data.TypeString},
 	}}, nil
 }
-func (b *scCountingBackend) PrimaryKeys(string, string) ([]string, error) { return nil, nil }
+func (b *scCountingBackend) PrimaryKeys(string, string) ([]string, error)        { return nil, nil }
 func (b *scCountingBackend) ColumnsMeta(string, string) ([]db.ColumnMeta, error) { return nil, nil }
 func (b *scCountingBackend) ColumnIndexTypes(string, string) (map[string]string, error) {
 	return nil, nil

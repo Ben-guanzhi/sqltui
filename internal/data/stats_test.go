@@ -18,7 +18,7 @@ func TestNullCount(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			c := Column{Name: "c", Cells: tt.cells}
+			c := Column{Name: "c", cells: tt.cells}
 			if got := NullCount(&c); got != tt.want {
 				t.Errorf("NullCount = %d, want %d", got, tt.want)
 			}
@@ -35,12 +35,12 @@ func TestEstimatedSize(t *testing.T) {
 		{"empty frame", New("a"), 0},
 		{
 			"strings are len+16",
-			frameOf(Column{Name: "s", Type: TypeString, Cells: []any{"abc", ""}}),
+			frameOf(Column{Name: "s", Type: TypeString, cells: []any{"abc", ""}}),
 			(3 + 16) + (0 + 16),
 		},
 		{
 			"scalars are 16, times 24",
-			frameOf(Column{Name: "m", Cells: []any{int64(1), 2.5, true, nil, time.Now()}}),
+			frameOf(Column{Name: "m", cells: []any{int64(1), 2.5, true, nil, time.Now()}}),
 			16 + 16 + 16 + 16 + 24,
 		},
 	}
@@ -55,8 +55,8 @@ func TestEstimatedSize(t *testing.T) {
 
 func TestShape(t *testing.T) {
 	f := frameOf(
-		Column{Name: "a", Cells: []any{int64(1), int64(2), int64(3)}},
-		Column{Name: "b", Cells: []any{"x", "y", "z"}},
+		Column{Name: "a", cells: []any{int64(1), int64(2), int64(3)}},
+		Column{Name: "b", cells: []any{"x", "y", "z"}},
 	)
 	rows, cols := Shape(f)
 	if rows != 3 || cols != 2 {

@@ -9,9 +9,9 @@ import (
 
 func scatTestFrame() *data.Frame {
 	return &data.Frame{Columns: []data.Column{
-		{Name: "x", Type: data.TypeInt, Cells: []any{int64(1), int64(2), int64(3), nil}},
-		{Name: "y", Type: data.TypeFloat, Cells: []any{1.5, nil, 3.5, 4.0}},
-		{Name: "grp", Type: data.TypeString, Cells: []any{"a", "b", "a", nil}},
+		data.NewColumn("x", data.TypeInt, []any{int64(1), int64(2), int64(3), nil}),
+		data.NewColumn("y", data.TypeFloat, []any{1.5, nil, 3.5, 4.0}),
+		data.NewColumn("grp", data.TypeString, []any{"a", "b", "a", nil}),
 	}}
 }
 
@@ -37,9 +37,9 @@ func TestScatPoints(t *testing.T) {
 
 func TestScatPointsNullGroupLabel(t *testing.T) {
 	f := &data.Frame{Columns: []data.Column{
-		{Name: "x", Type: data.TypeInt, Cells: []any{int64(1)}},
-		{Name: "y", Type: data.TypeInt, Cells: []any{int64(2)}},
-		{Name: "g", Type: data.TypeString, Cells: []any{nil}},
+		data.NewColumn("x", data.TypeInt, []any{int64(1)}),
+		data.NewColumn("y", data.TypeInt, []any{int64(2)}),
+		data.NewColumn("g", data.TypeString, []any{nil}),
 	}}
 	_, _, groups := scatPoints(f, 0, 1, 2)
 	if len(groups) != 1 || groups[0] != "(null)" {

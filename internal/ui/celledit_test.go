@@ -20,8 +20,8 @@ type cellEditBackend struct {
 	err  error
 }
 
-func (b *cellEditBackend) Kind() string             { return b.kind }
-func (b *cellEditBackend) Title() string            { return "stub" }
+func (b *cellEditBackend) Kind() string  { return b.kind }
+func (b *cellEditBackend) Title() string { return "stub" }
 func (b *cellEditBackend) Run(stmt string) (db.Result, error) {
 	b.last = stmt
 	return b.res, b.err
@@ -31,16 +31,18 @@ func (b *cellEditBackend) Tables(string) ([]string, error) { return nil, nil }
 func (b *cellEditBackend) FetchTable(string, string, int) (*data.Frame, error) {
 	return nil, nil
 }
-func (b *cellEditBackend) PrimaryKeys(string, string) ([]string, error)                { return b.pks, nil }
-func (b *cellEditBackend) ColumnsMeta(string, string) ([]db.ColumnMeta, error)         { return nil, nil }
-func (b *cellEditBackend) ColumnIndexTypes(string, string) (map[string]string, error)  { return nil, nil }
-func (b *cellEditBackend) Close() error                                                { return nil }
+func (b *cellEditBackend) PrimaryKeys(string, string) ([]string, error)        { return b.pks, nil }
+func (b *cellEditBackend) ColumnsMeta(string, string) ([]db.ColumnMeta, error) { return nil, nil }
+func (b *cellEditBackend) ColumnIndexTypes(string, string) (map[string]string, error) {
+	return nil, nil
+}
+func (b *cellEditBackend) Close() error { return nil }
 
 func cellEditFrame() *data.Frame {
 	return &data.Frame{Columns: []data.Column{
-		{Name: "id", Type: data.TypeInt, Cells: []any{int64(1), int64(2), int64(3)}},
-		{Name: "name", Type: data.TypeString, Cells: []any{"ann", "bob", "cyd"}},
-		{Name: "ns", Type: data.TypeString, Cells: []any{"a", "b", "c"}},
+		data.NewColumn("id", data.TypeInt, []any{int64(1), int64(2), int64(3)}),
+		data.NewColumn("name", data.TypeString, []any{"ann", "bob", "cyd"}),
+		data.NewColumn("ns", data.TypeString, []any{"a", "b", "c"}),
 	}}
 }
 
@@ -221,26 +223,26 @@ type cellEditCtx struct {
 	paneID int
 }
 
-func (c *cellEditCtx) CurrentFrame() *data.Frame            { return c.frame }
-func (c *cellEditCtx) CurrentRow() int                      { return 0 }
-func (c *cellEditCtx) SheetFieldCursor() int                { return 0 }
-func (c *cellEditCtx) CurrentTableNamespace() string        { return "" }
-func (c *cellEditCtx) BaseCrumb() string                    { return "users" }
-func (c *cellEditCtx) Crumbs() []string                     { return nil }
-func (c *cellEditCtx) ColumnNames() []string                { return nil }
-func (c *cellEditCtx) Engine() *query.Engine                { return nil }
-func (c *cellEditCtx) TableNames() []string                 { return nil }
-func (c *cellEditCtx) Backend() db.Backend                  { return c.be }
-func (c *cellEditCtx) KV() db.KVBackend                     { return nil }
-func (c *cellEditCtx) Theme() *theme.Theme                  { return nil }
-func (c *cellEditCtx) ThemeName() string                    { return "" }
-func (c *cellEditCtx) ShowBorders() bool                    { return false }
-func (c *cellEditCtx) ShowRowNumbers() bool                 { return false }
-func (c *cellEditCtx) Tabs() []TabInfo                      { return nil }
-func (c *cellEditCtx) ActiveTab() int                       { return 0 }
-func (c *cellEditCtx) ActivePaneID() int                    { return c.paneID }
-func (c *cellEditCtx) PendingEdit() *PendingEdit            { return nil }
-func (c *cellEditCtx) PendingDelete() *PendingDelete        { return nil }
+func (c *cellEditCtx) CurrentFrame() *data.Frame     { return c.frame }
+func (c *cellEditCtx) CurrentRow() int               { return 0 }
+func (c *cellEditCtx) SheetFieldCursor() int         { return 0 }
+func (c *cellEditCtx) CurrentTableNamespace() string { return "" }
+func (c *cellEditCtx) BaseCrumb() string             { return "users" }
+func (c *cellEditCtx) Crumbs() []string              { return nil }
+func (c *cellEditCtx) ColumnNames() []string         { return nil }
+func (c *cellEditCtx) Engine() *query.Engine         { return nil }
+func (c *cellEditCtx) TableNames() []string          { return nil }
+func (c *cellEditCtx) Backend() db.Backend           { return c.be }
+func (c *cellEditCtx) KV() db.KVBackend              { return nil }
+func (c *cellEditCtx) Theme() *theme.Theme           { return nil }
+func (c *cellEditCtx) ThemeName() string             { return "" }
+func (c *cellEditCtx) ShowBorders() bool             { return false }
+func (c *cellEditCtx) ShowRowNumbers() bool          { return false }
+func (c *cellEditCtx) Tabs() []TabInfo               { return nil }
+func (c *cellEditCtx) ActiveTab() int                { return 0 }
+func (c *cellEditCtx) ActivePaneID() int             { return c.paneID }
+func (c *cellEditCtx) PendingEdit() *PendingEdit     { return nil }
+func (c *cellEditCtx) PendingDelete() *PendingDelete { return nil }
 
 func TestCommitCellEditDBMode(t *testing.T) {
 	be := &cellEditBackend{

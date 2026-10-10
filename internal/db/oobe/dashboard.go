@@ -73,8 +73,12 @@ func (b *Backend) ListDashboardsInFolder(folderID, folderName string) ([]Dashboa
 				Queries []struct {
 					Query  string `json:"query"`
 					Fields struct {
-						X []struct{ Alias string `json:"alias"` } `json:"x"`
-						Y []struct{ Alias string `json:"alias"` } `json:"y"`
+						X []struct {
+							Alias string `json:"alias"`
+						} `json:"x"`
+						Y []struct {
+							Alias string `json:"alias"`
+						} `json:"y"`
 					} `json:"fields"`
 				} `json:"queries"`
 			} `json:"panels"`

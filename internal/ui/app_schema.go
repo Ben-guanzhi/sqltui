@@ -10,35 +10,26 @@ import (
 	"github.com/LinPr/sqltui/internal/query"
 )
 
-// completionCaches memoizes one backend-schema snapshot per app. The App
-// struct lives in app.go (owned by other concerns), so instead of a new
-// field the cache hangs off this package-level map keyed by the *App
-// pointer. Each app owns at most one entry, overwritten in place when its
-// connection changes, and apps live for the process lifetime, so the map
-// stays bounded and leak-free.
-var completionCaches sync.Map // *App -> *schemaCache
-
 // schemaCache is the lazily-filled snapshot of a live connection's catalog.
-// The backend field identifies the connection the snapshot was built from;
-// a SetBackendMsg swaps a.backend, which the accessors detect and answer by
+// It lives on the App struct (App.schemaC, created in New); the backend
+// field identifies the connection the snapshot was built from; a
+// SetBackendMsg swaps a.backend, which the accessors detect and answer by
 // resetting the entry, so no explicit invalidation hook is needed.
 type schemaCache struct {
 	mu      sync.Mutex
-	backend db.Backend            // connection the snapshot belongs to
-	listed  bool                  // namespace/table listing completed
-	ns      map[string]string     // table -> namespace (for column fetches)
-	cols    map[string][]string   // table -> columns (nil until fetched)
+	backend db.Backend                 // connection the snapshot belongs to
+	listed  bool                       // namespace/table listing completed
+	ns      map[string]string          // table -> namespace (for column fetches)
+	cols    map[string][]string        // table -> columns (nil until fetched)
 	meta    map[string][]db.ColumnMeta // table -> full column metadata
-	fetched map[string]bool       // column fetch attempted (even if empty)
+	fetched map[string]bool            // column fetch attempted (even if empty)
 }
 
-// completionCache returns the app's cache entry, creating it on first use.
+// completionCache returns the app's schema snapshot. The pointer is created
+// in New and never reassigned, so it is safe to call from tea.Cmd
+// goroutines as well as the update loop.
 func (a *App) completionCache() *schemaCache {
-	if v, ok := completionCaches.Load(a); ok {
-		return v.(*schemaCache)
-	}
-	v, _ := completionCaches.LoadOrStore(a, &schemaCache{})
-	return v.(*schemaCache)
+	return a.schemaC
 }
 
 // resetFor rebinds the cache to be (locked) and clears any snapshot taken

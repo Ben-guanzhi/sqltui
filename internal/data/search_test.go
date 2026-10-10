@@ -7,8 +7,8 @@ import (
 
 func searchFixture() *Frame {
 	return frameOf(
-		Column{Name: "name", Type: TypeString, Cells: []any{"apple pie", "Banana", "cherry", nil}},
-		Column{Name: "qty", Type: TypeInt, Cells: []any{int64(10), int64(200), int64(3), int64(42)}},
+		Column{Name: "name", Type: TypeString, cells: []any{"apple pie", "Banana", "cherry", nil}},
+		Column{Name: "qty", Type: TypeInt, cells: []any{int64(10), int64(200), int64(3), int64(42)}},
 	)
 }
 
@@ -58,7 +58,7 @@ func TestSearchFuzzy(t *testing.T) {
 }
 
 func TestSearchFuzzyPreservesFrameOrder(t *testing.T) {
-	f := frameOf(Column{Name: "w", Type: TypeString, Cells: []any{
+	f := frameOf(Column{Name: "w", Type: TypeString, cells: []any{
 		"xxcatxx", "cat", "c-a-t", "dog",
 	}})
 	got := SearchFuzzy(f, "cat")

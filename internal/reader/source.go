@@ -65,8 +65,9 @@ func (s *Source) Bytes() ([]byte, error) {
 }
 
 // Cleanup removes the temporary spool file backing a stdin or URL source.
-// It is a no-op for plain local files. Safe to call once every reader is
-// done: readers fully materialize their frames before returning.
+// It is a no-op for plain local files. Safe to call once every reader (and
+// every Pager, which opens the file per operation) is done: readers fully
+// materialize their frames before returning, and pagers are closed first.
 func (s *Source) Cleanup() {
 	if s.Stdin || s.URL {
 		os.Remove(s.LocalPath)
@@ -85,17 +86,15 @@ func FromFile(path string) (*Source, error) {
 	return &Source{Path: path, LocalPath: path}, nil
 }
 
-// FromStdin spools standard input to a temporary file.
+// FromStdin spools standard input to a temporary file. The stream is copied
+// straight to disk — buffering it in memory first would OOM on GB-scale
+// pipes, which is the failure mode this package's loading path avoids.
 func FromStdin() (*Source, error) {
-	buf := &bytes.Buffer{}
-	if _, err := io.Copy(buf, os.Stdin); err != nil {
-		return nil, err
-	}
 	tmp, err := os.CreateTemp("", "sqltui-stdin-*")
 	if err != nil {
 		return nil, err
 	}
-	if _, err := tmp.Write(buf.Bytes()); err != nil {
+	if _, err := io.Copy(tmp, os.Stdin); err != nil {
 		tmp.Close()
 		os.Remove(tmp.Name())
 		return nil, err

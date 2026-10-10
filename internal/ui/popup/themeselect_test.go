@@ -16,25 +16,25 @@ import (
 // themeTestCtx is a minimal AppContext for exercising the factory.
 type themeTestCtx struct{ themeName string }
 
-func (c themeTestCtx) CurrentFrame() *data.Frame { return nil }
-func (c themeTestCtx) CurrentRow() int           { return 0 }
-func (c themeTestCtx) SheetFieldCursor() int     { return 0 }
-func (c themeTestCtx) CurrentTableNamespace() string { return "" }
-func (c themeTestCtx) BaseCrumb() string         { return "" }
-func (c themeTestCtx) Crumbs() []string          { return nil }
-func (c themeTestCtx) ColumnNames() []string     { return nil }
-func (c themeTestCtx) Engine() *query.Engine     { return nil }
-func (c themeTestCtx) TableNames() []string      { return nil }
-func (c themeTestCtx) Backend() db.Backend       { return nil }
-func (c themeTestCtx) KV() db.KVBackend          { return nil }
-func (c themeTestCtx) Theme() *theme.Theme       { return theme.Default() }
-func (c themeTestCtx) ThemeName() string         { return c.themeName }
-func (c themeTestCtx) ShowBorders() bool         { return false }
-func (c themeTestCtx) ShowRowNumbers() bool      { return false }
-func (c themeTestCtx) Tabs() []ui.TabInfo        { return nil }
-func (c themeTestCtx) ActiveTab() int            { return 0 }
-func (c themeTestCtx) ActivePaneID() int         { return 0 }
-func (c themeTestCtx) PendingEdit() *ui.PendingEdit   { return nil }
+func (c themeTestCtx) CurrentFrame() *data.Frame        { return nil }
+func (c themeTestCtx) CurrentRow() int                  { return 0 }
+func (c themeTestCtx) SheetFieldCursor() int            { return 0 }
+func (c themeTestCtx) CurrentTableNamespace() string    { return "" }
+func (c themeTestCtx) BaseCrumb() string                { return "" }
+func (c themeTestCtx) Crumbs() []string                 { return nil }
+func (c themeTestCtx) ColumnNames() []string            { return nil }
+func (c themeTestCtx) Engine() *query.Engine            { return nil }
+func (c themeTestCtx) TableNames() []string             { return nil }
+func (c themeTestCtx) Backend() db.Backend              { return nil }
+func (c themeTestCtx) KV() db.KVBackend                 { return nil }
+func (c themeTestCtx) Theme() *theme.Theme              { return theme.Default() }
+func (c themeTestCtx) ThemeName() string                { return c.themeName }
+func (c themeTestCtx) ShowBorders() bool                { return false }
+func (c themeTestCtx) ShowRowNumbers() bool             { return false }
+func (c themeTestCtx) Tabs() []ui.TabInfo               { return nil }
+func (c themeTestCtx) ActiveTab() int                   { return 0 }
+func (c themeTestCtx) ActivePaneID() int                { return 0 }
+func (c themeTestCtx) PendingEdit() *ui.PendingEdit     { return nil }
 func (c themeTestCtx) PendingDelete() *ui.PendingDelete { return nil }
 
 // themeCollectMsgs runs a command (flattening batches) and returns every

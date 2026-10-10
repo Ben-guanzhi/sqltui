@@ -62,7 +62,7 @@ func rowObject(f *data.Frame, keys [][]byte, row int) []byte {
 		}
 		buf.Write(keys[c])
 		buf.WriteByte(':')
-		buf.Write(jsonValue(f.Columns[c].Cells[row]))
+		buf.Write(jsonValue(f.Cell(row, c)))
 	}
 	buf.WriteByte('}')
 	return buf.Bytes()

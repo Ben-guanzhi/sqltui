@@ -26,25 +26,25 @@ type qxCtx struct {
 	base    string
 }
 
-func (c *qxCtx) CurrentFrame() *data.Frame { return nil }
-func (c *qxCtx) CurrentRow() int           { return 0 }
-func (c *qxCtx) SheetFieldCursor() int     { return 0 }
-func (c *qxCtx) CurrentTableNamespace() string { return "" }
-func (c *qxCtx) BaseCrumb() string         { return c.base }
-func (c *qxCtx) Crumbs() []string          { return nil }
-func (c *qxCtx) ColumnNames() []string     { return c.cols }
-func (c *qxCtx) Engine() *query.Engine     { return c.engine }
-func (c *qxCtx) TableNames() []string      { return c.tables }
-func (c *qxCtx) Backend() db.Backend       { return c.backend }
-func (c *qxCtx) KV() db.KVBackend          { return nil }
-func (c *qxCtx) Theme() *theme.Theme       { return nil }
-func (c *qxCtx) ThemeName() string         { return "" }
-func (c *qxCtx) ShowBorders() bool         { return false }
-func (c *qxCtx) ShowRowNumbers() bool      { return false }
-func (c *qxCtx) Tabs() []ui.TabInfo        { return nil }
-func (c *qxCtx) ActiveTab() int            { return 0 }
-func (c *qxCtx) ActivePaneID() int         { return 0 }
-func (c *qxCtx) PendingEdit() *ui.PendingEdit   { return nil }
+func (c *qxCtx) CurrentFrame() *data.Frame        { return nil }
+func (c *qxCtx) CurrentRow() int                  { return 0 }
+func (c *qxCtx) SheetFieldCursor() int            { return 0 }
+func (c *qxCtx) CurrentTableNamespace() string    { return "" }
+func (c *qxCtx) BaseCrumb() string                { return c.base }
+func (c *qxCtx) Crumbs() []string                 { return nil }
+func (c *qxCtx) ColumnNames() []string            { return c.cols }
+func (c *qxCtx) Engine() *query.Engine            { return c.engine }
+func (c *qxCtx) TableNames() []string             { return c.tables }
+func (c *qxCtx) Backend() db.Backend              { return c.backend }
+func (c *qxCtx) KV() db.KVBackend                 { return nil }
+func (c *qxCtx) Theme() *theme.Theme              { return nil }
+func (c *qxCtx) ThemeName() string                { return "" }
+func (c *qxCtx) ShowBorders() bool                { return false }
+func (c *qxCtx) ShowRowNumbers() bool             { return false }
+func (c *qxCtx) Tabs() []ui.TabInfo               { return nil }
+func (c *qxCtx) ActiveTab() int                   { return 0 }
+func (c *qxCtx) ActivePaneID() int                { return 0 }
+func (c *qxCtx) PendingEdit() *ui.PendingEdit     { return nil }
 func (c *qxCtx) PendingDelete() *ui.PendingDelete { return nil }
 
 type qxFakeBackend struct {
@@ -64,16 +64,16 @@ func (b *qxFakeBackend) Tables(string) ([]string, error) { return nil, nil }
 func (b *qxFakeBackend) FetchTable(string, string, int) (*data.Frame, error) {
 	return nil, nil
 }
-func (b *qxFakeBackend) PrimaryKeys(string, string) ([]string, error)                { return nil, nil }
-func (b *qxFakeBackend) ColumnsMeta(string, string) ([]db.ColumnMeta, error)         { return nil, nil }
-func (b *qxFakeBackend) ColumnIndexTypes(string, string) (map[string]string, error)  { return nil, nil }
-func (b *qxFakeBackend) Close() error                                                { return nil }
+func (b *qxFakeBackend) PrimaryKeys(string, string) ([]string, error)               { return nil, nil }
+func (b *qxFakeBackend) ColumnsMeta(string, string) ([]db.ColumnMeta, error)        { return nil, nil }
+func (b *qxFakeBackend) ColumnIndexTypes(string, string) (map[string]string, error) { return nil, nil }
+func (b *qxFakeBackend) Close() error                                               { return nil }
 
 // qxTestFrame builds a two-column frame: name (str) and age (i64).
 func qxTestFrame() *data.Frame {
 	return &data.Frame{Columns: []data.Column{
-		{Name: "name", Type: data.TypeString, Cells: []any{"ann", "bob", "cyd"}},
-		{Name: "age", Type: data.TypeInt, Cells: []any{int64(1), int64(2), int64(3)}},
+		data.NewColumn("name", data.TypeString, []any{"ann", "bob", "cyd"}),
+		data.NewColumn("age", data.TypeInt, []any{int64(1), int64(2), int64(3)}),
 	}}
 }
 
@@ -218,6 +218,63 @@ func TestQxTargetAndBuilders(t *testing.T) {
 	live := &qxCtx{backend: &qxFakeBackend{}, base: "users"}
 	if got := qxFilterSQL(live, "id = 1"); got != `SELECT * FROM "users" WHERE id = 1` {
 		t.Errorf("live-mode filter sql = %s", got)
+	}
+}
+
+// qxTargetedBackend adds db.TableTargeter to the fake backend: names come
+// back ns-qualified with pipe delimiters so tests see the spelling plainly.
+type qxTargetedBackend struct {
+	qxFakeBackend
+}
+
+func (b *qxTargetedBackend) TableTarget(namespace, table string) string {
+	if namespace != "" {
+		return namespace + "|" + table
+	}
+	return table
+}
+
+// qxSourceCtx is a live context whose pane records a real source table.
+type qxSourceCtx struct {
+	*qxCtx
+	ns, table string
+}
+
+func (c *qxSourceCtx) TableSource() (string, string) { return c.ns, c.table }
+
+func TestQxTargetUsesRecordedSourceTable(t *testing.T) {
+	// Recorded source beats the tab-title heuristic, qualified via TableTarget.
+	ctx := &qxSourceCtx{
+		qxCtx: &qxCtx{backend: &qxTargetedBackend{}, base: "SELECT a, b, c"},
+		ns:    "sales", table: "orders",
+	}
+	if got := qxTarget(ctx); got != "sales|orders" {
+		t.Errorf("qualified target = %s, want sales|orders", got)
+	}
+
+	// Empty recorded namespace passes through to the backend spelling alone.
+	ctx.ns = ""
+	if got := qxTarget(ctx); got != "orders" {
+		t.Errorf("unqualified target = %s, want orders", got)
+	}
+
+	// A backend without TableTargeter falls back to plain quoting of the
+	// recorded table name (not the title).
+	ctx2 := &qxSourceCtx{
+		qxCtx: &qxCtx{backend: &qxFakeBackend{}, base: "SELECT a, b, c"},
+		ns:    "sales", table: "orders",
+	}
+	if got := qxTarget(ctx2); got != `"orders"` {
+		t.Errorf("no-TableTargeter target = %s, want \"orders\"", got)
+	}
+
+	// No recorded source (query-opened tab) keeps the legacy heuristic.
+	ctx3 := &qxSourceCtx{
+		qxCtx: &qxCtx{backend: &qxTargetedBackend{}, base: "users"},
+		ns:    "", table: "",
+	}
+	if got := qxTarget(ctx3); got != `"users"` {
+		t.Errorf("heuristic target = %s, want quoted title", got)
 	}
 }
 

@@ -258,8 +258,9 @@ func scatColumnFloats(f *data.Frame, col int) []float64 {
 		return nil
 	}
 	out := make([]float64, 0, f.NumRows())
-	for _, cell := range f.Columns[col].Cells {
-		if v, ok := scatFloat(cell); ok {
+	c := f.Columns[col]
+	for i := 0; i < c.Len(); i++ {
+		if v, ok := scatFloat(c.Cell(i)); ok {
 			out = append(out, v)
 		}
 	}

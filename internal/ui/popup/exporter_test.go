@@ -21,36 +21,36 @@ type exportStubCtx struct {
 	crumb string
 }
 
-func (c *exportStubCtx) CurrentFrame() *data.Frame { return c.frame }
-func (c *exportStubCtx) CurrentRow() int           { return 0 }
-func (c *exportStubCtx) SheetFieldCursor() int     { return 0 }
+func (c *exportStubCtx) CurrentFrame() *data.Frame     { return c.frame }
+func (c *exportStubCtx) CurrentRow() int               { return 0 }
+func (c *exportStubCtx) SheetFieldCursor() int         { return 0 }
 func (c *exportStubCtx) CurrentTableNamespace() string { return "" }
-func (c *exportStubCtx) BaseCrumb() string         { return c.crumb }
-func (c *exportStubCtx) Crumbs() []string          { return nil }
+func (c *exportStubCtx) BaseCrumb() string             { return c.crumb }
+func (c *exportStubCtx) Crumbs() []string              { return nil }
 func (c *exportStubCtx) ColumnNames() []string {
 	if c.frame == nil {
 		return nil
 	}
 	return c.frame.ColumnNames()
 }
-func (c *exportStubCtx) Engine() *query.Engine { return nil }
-func (c *exportStubCtx) TableNames() []string  { return nil }
-func (c *exportStubCtx) Backend() db.Backend   { return nil }
-func (c *exportStubCtx) KV() db.KVBackend      { return nil }
-func (c *exportStubCtx) Theme() *theme.Theme   { return nil }
-func (c *exportStubCtx) ThemeName() string     { return "" }
-func (c *exportStubCtx) ShowBorders() bool     { return false }
-func (c *exportStubCtx) ShowRowNumbers() bool  { return false }
-func (c *exportStubCtx) Tabs() []ui.TabInfo    { return nil }
-func (c *exportStubCtx) ActiveTab() int        { return 0 }
-func (c *exportStubCtx) ActivePaneID() int     { return 0 }
-func (c *exportStubCtx) PendingEdit() *ui.PendingEdit   { return nil }
+func (c *exportStubCtx) Engine() *query.Engine            { return nil }
+func (c *exportStubCtx) TableNames() []string             { return nil }
+func (c *exportStubCtx) Backend() db.Backend              { return nil }
+func (c *exportStubCtx) KV() db.KVBackend                 { return nil }
+func (c *exportStubCtx) Theme() *theme.Theme              { return nil }
+func (c *exportStubCtx) ThemeName() string                { return "" }
+func (c *exportStubCtx) ShowBorders() bool                { return false }
+func (c *exportStubCtx) ShowRowNumbers() bool             { return false }
+func (c *exportStubCtx) Tabs() []ui.TabInfo               { return nil }
+func (c *exportStubCtx) ActiveTab() int                   { return 0 }
+func (c *exportStubCtx) ActivePaneID() int                { return 0 }
+func (c *exportStubCtx) PendingEdit() *ui.PendingEdit     { return nil }
 func (c *exportStubCtx) PendingDelete() *ui.PendingDelete { return nil }
 
 func exportTestFrame() *data.Frame {
 	return &data.Frame{Columns: []data.Column{
-		{Name: "a", Type: data.TypeInt, Cells: []any{int64(1), int64(2)}},
-		{Name: "b", Type: data.TypeString, Cells: []any{"x", "y"}},
+		data.NewColumn("a", data.TypeInt, []any{int64(1), int64(2)}),
+		data.NewColumn("b", data.TypeString, []any{"x", "y"}),
 	}}
 }
 

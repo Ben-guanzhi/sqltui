@@ -32,6 +32,7 @@ type Backend struct {
 }
 
 var _ db.Backend = (*Backend)(nil)
+var _ db.TableTargeter = (*Backend)(nil)
 
 // Connect opens a postgres connection and pings it before returning.
 func Connect(cfg Config) (*Backend, error) {
@@ -108,10 +109,15 @@ func (b *Backend) Tables(namespace string) ([]string, error) {
 	return b.db.ListTables(namespace)
 }
 
+// TableTarget spells namespace.table as "ns"."tbl" with double-quoted,
+// escaped parts.
+func (b *Backend) TableTarget(namespace, table string) string {
+	return db.QuoteIdentDouble(namespace) + "." + db.QuoteIdentDouble(table)
+}
+
 // FetchTable loads up to limit rows of namespace.table.
 func (b *Backend) FetchTable(namespace, table string, limit int) (*data.Frame, error) {
-	query := fmt.Sprintf("SELECT * FROM %s.%s LIMIT %d",
-		db.QuoteIdentDouble(namespace), db.QuoteIdentDouble(table), limit)
+	query := fmt.Sprintf("SELECT * FROM %s LIMIT %d", b.TableTarget(namespace, table), limit)
 	fields, records, err := b.db.RawQuery(query)
 	if err != nil {
 		return nil, err

@@ -61,7 +61,7 @@ func InferFrame(f *Frame, mode string, types []string) *Frame {
 		if c.Type != TypeString {
 			continue
 		}
-		sample := c.Cells
+		sample := c.cells
 		if mode == "fast" && len(sample) > inferSampleRows {
 			sample = sample[:inferSampleRows]
 		}
@@ -70,7 +70,7 @@ func InferFrame(f *Frame, mode string, types []string) *Frame {
 			continue
 		}
 		c.Type = t
-		c.Cells = convertCells(c.Cells, t)
+		c.cells = convertCells(c.cells, t)
 	}
 	return out
 }

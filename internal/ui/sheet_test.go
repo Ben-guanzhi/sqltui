@@ -313,7 +313,9 @@ func TestActSheetDownScrollsOnlyAtEdge(t *testing.T) {
 // the real confirm popup (built by a concurrent agent).
 type stubConfirmSaveOverlay struct{}
 
-func (stubConfirmSaveOverlay) Update(tea.Msg) (Overlay, tea.Cmd) { return stubConfirmSaveOverlay{}, nil }
+func (stubConfirmSaveOverlay) Update(tea.Msg) (Overlay, tea.Cmd) {
+	return stubConfirmSaveOverlay{}, nil
+}
 func (stubConfirmSaveOverlay) View(int, int, *theme.Theme) string { return "" }
 
 func TestActEditTogglesAndCtrlSCommits(t *testing.T) {
@@ -393,12 +395,11 @@ type metaBackend struct {
 	meta []db.ColumnMeta
 }
 
-func (b *metaBackend) Namespaces() ([]string, error) { return []string{"main"}, nil }
+func (b *metaBackend) Namespaces() ([]string, error)   { return []string{"main"}, nil }
 func (b *metaBackend) Tables(string) ([]string, error) { return []string{"users"}, nil }
 func (b *metaBackend) ColumnsMeta(string, string) ([]db.ColumnMeta, error) {
 	return b.meta, nil
 }
-
 
 // TestCursorFieldMetaDBAndFileMode asserts cursorFieldMeta resolves the
 // cached engine metadata in db mode, and falls back to the frame DType in
@@ -774,4 +775,3 @@ func TestSheetFilterBackspaceAndCtrlU(t *testing.T) {
 		t.Fatalf("after ctrl+u matched = %d cols, want %d", len(matched), f.NumCols())
 	}
 }
-

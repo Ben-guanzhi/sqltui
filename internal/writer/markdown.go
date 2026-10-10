@@ -38,7 +38,7 @@ func (markdownWriter) Write(w io.Writer, f *data.Frame, opt Options) error {
 	for r := range body {
 		row := make([]string, nCols)
 		for c := range f.Columns {
-			row[c] = mdEscaper.Replace(data.FormatValue(f.Columns[c].Cells[r]))
+			row[c] = mdEscaper.Replace(data.FormatValue(f.Cell(r, c)))
 			if n := utf8.RuneCountInString(row[c]); n > widths[c] {
 				widths[c] = n
 			}

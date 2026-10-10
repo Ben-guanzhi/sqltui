@@ -24,7 +24,19 @@ type fileFlags struct {
 	noFlexibleWidth bool
 	key             string
 	multiparts      []string
+	maxBytes        int64
+	maxRows         int
 }
+
+const (
+	// defaultMaxLoadBytes: sources larger than this are not fully
+	// materialized — full in-memory load is the documented OOM path for
+	// GB-scale files. Paged formats load a bounded, visibly-named preview;
+	// others fail with advice instead of dying mid-load.
+	defaultMaxLoadBytes = 1 << 30 // 1 GiB
+	// defaultMaxPreviewRows bounds the preview window for oversized sources.
+	defaultMaxPreviewRows = 200_000
+)
 
 var flags fileFlags
 
@@ -34,7 +46,7 @@ var Version = "dev"
 var rootCmd = &cobra.Command{
 	Use:     "sqltui [files...]",
 	Version: Version,
-	Short: "Terminal viewer and SQL workbench for tabular data and databases",
+	Short:   "Terminal viewer and SQL workbench for tabular data and databases",
 	Long: `sqltui is a terminal UI for browsing and querying tabular data.
 
 There are two ways to use it:
@@ -93,6 +105,10 @@ func init() {
 	f.BoolVar(&flags.noFlexibleWidth, "no-flexible-width", false, "enforce strict column widths (fwf only)")
 	f.StringVar(&flags.key, "sqlite-key", "", "decryption key for encrypted database files (sqlite only)")
 	f.StringSliceVar(&flags.multiparts, "multiparts", nil, "concatenate these files vertically into a single table (any format)")
+	f.Int64Var(&flags.maxBytes, "max-bytes", defaultMaxLoadBytes,
+		"sources larger than this are not loaded whole: paged formats (csv/tsv/dsv) open a bounded preview, others fail")
+	f.IntVar(&flags.maxRows, "max-rows", defaultMaxPreviewRows,
+		"maximum rows loaded from an oversized source (its preview window)")
 }
 
 // Execute runs the CLI.

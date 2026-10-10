@@ -27,7 +27,7 @@ func TestConcat(t *testing.T) {
 		{
 			name: "single frame copies through",
 			frames: []*Frame{
-				frameOf(Column{Name: "a", Type: TypeInt, Cells: []any{int64(1)}}),
+				frameOf(Column{Name: "a", Type: TypeInt, cells: []any{int64(1)}}),
 			},
 			wantNames: []string{"a"},
 			wantTypes: []DType{TypeInt},
@@ -36,8 +36,8 @@ func TestConcat(t *testing.T) {
 		{
 			name: "same schema stacks rows",
 			frames: []*Frame{
-				frameOf(Column{Name: "a", Type: TypeInt, Cells: []any{int64(1), int64(2)}}),
-				frameOf(Column{Name: "a", Type: TypeInt, Cells: []any{int64(3)}}),
+				frameOf(Column{Name: "a", Type: TypeInt, cells: []any{int64(1), int64(2)}}),
+				frameOf(Column{Name: "a", Type: TypeInt, cells: []any{int64(3)}}),
 			},
 			wantNames: []string{"a"},
 			wantTypes: []DType{TypeInt},
@@ -46,8 +46,8 @@ func TestConcat(t *testing.T) {
 		{
 			name: "union fills missing with nulls",
 			frames: []*Frame{
-				frameOf(Column{Name: "a", Type: TypeInt, Cells: []any{int64(1)}}),
-				frameOf(Column{Name: "b", Type: TypeString, Cells: []any{"x"}}),
+				frameOf(Column{Name: "a", Type: TypeInt, cells: []any{int64(1)}}),
+				frameOf(Column{Name: "b", Type: TypeString, cells: []any{"x"}}),
 			},
 			wantNames: []string{"a", "b"},
 			wantTypes: []DType{TypeInt, TypeString},
@@ -59,8 +59,8 @@ func TestConcat(t *testing.T) {
 		{
 			name: "type conflict unifies to string",
 			frames: []*Frame{
-				frameOf(Column{Name: "a", Type: TypeInt, Cells: []any{int64(1), nil}}),
-				frameOf(Column{Name: "a", Type: TypeFloat, Cells: []any{2.5}}),
+				frameOf(Column{Name: "a", Type: TypeInt, cells: []any{int64(1), nil}}),
+				frameOf(Column{Name: "a", Type: TypeFloat, cells: []any{2.5}}),
 			},
 			wantNames: []string{"a"},
 			wantTypes: []DType{TypeString},
@@ -70,12 +70,12 @@ func TestConcat(t *testing.T) {
 			name: "column order is first-seen across frames",
 			frames: []*Frame{
 				frameOf(
-					Column{Name: "b", Type: TypeString, Cells: []any{"b1"}},
-					Column{Name: "a", Type: TypeString, Cells: []any{"a1"}},
+					Column{Name: "b", Type: TypeString, cells: []any{"b1"}},
+					Column{Name: "a", Type: TypeString, cells: []any{"a1"}},
 				),
 				frameOf(
-					Column{Name: "c", Type: TypeString, Cells: []any{"c2"}},
-					Column{Name: "a", Type: TypeString, Cells: []any{"a2"}},
+					Column{Name: "c", Type: TypeString, cells: []any{"c2"}},
+					Column{Name: "a", Type: TypeString, cells: []any{"a2"}},
 				),
 			},
 			wantNames: []string{"b", "a", "c"},
@@ -106,8 +106,8 @@ func TestConcat(t *testing.T) {
 				if got.Columns[i].Type != tt.wantTypes[i] {
 					t.Errorf("col %q type = %v, want %v", got.Columns[i].Name, got.Columns[i].Type, tt.wantTypes[i])
 				}
-				if !reflect.DeepEqual(got.Columns[i].Cells, tt.wantCols[i]) {
-					t.Errorf("col %q cells = %#v, want %#v", got.Columns[i].Name, got.Columns[i].Cells, tt.wantCols[i])
+				if !reflect.DeepEqual(got.Columns[i].cells, tt.wantCols[i]) {
+					t.Errorf("col %q cells = %#v, want %#v", got.Columns[i].Name, got.Columns[i].cells, tt.wantCols[i])
 				}
 			}
 		})

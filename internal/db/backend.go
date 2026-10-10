@@ -110,3 +110,11 @@ type QueryParamsSetter interface {
 type TimeWindowResetter interface {
 	ResetTimeWindow()
 }
+
+// TableTargeter spells namespace.table as a FROM-clause target using the
+// engine's own identifier quoting, exactly the way FetchTable names it.
+// The inline-prompt SQL builders probe this so a pane's recorded source
+// table becomes real SQL without duplicating per-engine quoting in the UI.
+type TableTargeter interface {
+	TableTarget(namespace, table string) string
+}

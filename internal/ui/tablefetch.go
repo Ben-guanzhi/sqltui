@@ -85,7 +85,8 @@ func (o *TableLoader) ResultCmds(m TableLoadedMsg) []tea.Cmd {
 		}
 	}
 	frame, title := m.Frame, m.Table
-	msg := ApplyFrameMsg{Frame: frame, NewTab: true, TabTitle: title, Crumb: "table"}
+	msg := ApplyFrameMsg{Frame: frame, NewTab: true, TabTitle: title, Crumb: "table",
+		SourceNamespace: o.NS, SourceTable: m.Table}
 	// For OpenObserve streams, the frame has all columns (for row-detail) but
 	// the table summary view should only show the summary columns.
 	if o.Be.Kind() == "openobserve" {

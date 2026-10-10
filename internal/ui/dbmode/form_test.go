@@ -243,7 +243,6 @@ func TestConnFormFooterHint(t *testing.T) {
 // fake connector wired in through the dialer seam.
 func TestConnFormConnectSuccess(t *testing.T) {
 	file := useTempConfig(t)
-	t.Cleanup(conns.closeAll)
 
 	be := &fakeBackend{}
 	fakeDialer(t, func(kind string, v map[string]string) (db.Backend, db.KVBackend, error) {

@@ -5,7 +5,7 @@ import "time"
 // NullCount returns how many cells in the column are null (nil).
 func NullCount(c *Column) int {
 	n := 0
-	for _, v := range c.Cells {
+	for _, v := range c.cells {
 		if v == nil {
 			n++
 		}
@@ -19,7 +19,7 @@ func NullCount(c *Column) int {
 func EstimatedSize(f *Frame) int64 {
 	var total int64
 	for i := range f.Columns {
-		for _, v := range f.Columns[i].Cells {
+		for _, v := range f.Columns[i].cells {
 			switch x := v.(type) {
 			case string:
 				total += int64(len(x)) + 16

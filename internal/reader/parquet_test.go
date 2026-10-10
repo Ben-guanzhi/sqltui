@@ -84,7 +84,7 @@ func TestParquetPhysicalTypeMapping(t *testing.T) {
 		if f.Columns[i].Type != w.dtype {
 			t.Errorf("column %q type = %v, want %v", w.name, f.Columns[i].Type, w.dtype)
 		}
-		if got := f.Columns[i].Cells[0]; !reflect.DeepEqual(got, w.cell) {
+		if got := f.Cell(0, i); !reflect.DeepEqual(got, w.cell) {
 			t.Errorf("column %q cell = %#v, want %#v", w.name, got, w.cell)
 		}
 	}

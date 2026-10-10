@@ -42,25 +42,25 @@ func Concat(frames ...*Frame) (*Frame, error) {
 
 	out := &Frame{Columns: make([]Column, len(order))}
 	for i, name := range order {
-		col := Column{Name: name, Type: unified[name], Cells: make([]any, 0, totalRows)}
+		col := Column{Name: name, Type: unified[name], cells: make([]any, 0, totalRows)}
 		for _, f := range frames {
 			n := f.NumRows()
 			idx := f.ColumnIndex(name)
 			if idx < 0 {
-				col.Cells = append(col.Cells, make([]any, n)...) // nulls
+				col.cells = append(col.cells, make([]any, n)...) // nulls
 				continue
 			}
 			src := &f.Columns[idx]
 			if col.Type == TypeString && src.Type != TypeString {
-				for _, v := range src.Cells {
+				for _, v := range src.cells {
 					if v == nil {
-						col.Cells = append(col.Cells, nil)
+						col.cells = append(col.cells, nil)
 					} else {
-						col.Cells = append(col.Cells, FormatValue(v))
+						col.cells = append(col.cells, FormatValue(v))
 					}
 				}
 			} else {
-				col.Cells = append(col.Cells, src.Cells...)
+				col.cells = append(col.cells, src.cells...)
 			}
 		}
 		out.Columns[i] = col

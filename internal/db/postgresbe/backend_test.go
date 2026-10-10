@@ -96,3 +96,13 @@ func TestFormatAny(t *testing.T) {
 		}
 	}
 }
+
+func TestTableTarget(t *testing.T) {
+	b := &Backend{}
+	if got := b.TableTarget("sales", "orders"); got != `"sales"."orders"` {
+		t.Errorf("qualified = %s, want \"sales\".\"orders\"", got)
+	}
+	if got := b.TableTarget(`s"x`, "orders"); got != `"s""x"."orders"` {
+		t.Errorf("escaped = %s, want \"s\"\"x\".\"orders\"", got)
+	}
+}

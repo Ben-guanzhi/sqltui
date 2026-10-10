@@ -3,17 +3,8 @@ package redisbe
 import (
 	"context"
 	"encoding/json"
-	"sync"
 
 	"github.com/redis/go-redis/v9"
-)
-
-var (
-	RdsClinet *RDS
-	// clientMu serializes the check-close-assign swap of RdsClinet: dial
-	// commands run in goroutines and two overlapping reconnects must not
-	// race on the global client.
-	clientMu sync.Mutex
 )
 
 // max keys collected when browsing a key type from the tree view
@@ -23,6 +14,9 @@ type RDS struct {
 	rdsc *redis.Client
 }
 
+// NewRDS dials and verifies a redis connection. The caller owns the
+// returned client: whoever keeps it (the Backend built from it, reached by
+// the app) must Close it — replacing a connection closes the old one.
 func NewRDS(rdsOpt *redis.Options) (*RDS, error) {
 	rdsc := redis.NewClient(rdsOpt)
 
@@ -30,18 +24,7 @@ func NewRDS(rdsOpt *redis.Options) (*RDS, error) {
 		rdsc.Close()
 		return nil, err
 	}
-
-	clientMu.Lock()
-	defer clientMu.Unlock()
-	// close the previous connection when re-connecting
-	if RdsClinet != nil {
-		RdsClinet.rdsc.Close()
-	}
-
-	RdsClinet = &RDS{
-		rdsc: rdsc,
-	}
-	return RdsClinet, nil
+	return &RDS{rdsc: rdsc}, nil
 }
 
 func (rds *RDS) ExecuteRawQuery(args []string) (string, error) {

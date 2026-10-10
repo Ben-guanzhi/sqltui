@@ -16,15 +16,15 @@ import (
 
 // infoTestCtx is a minimal AppContext stub for info overlay tests.
 type infoTestCtx struct {
-	frame  *data.Frame
-	crumbs []string
-	ns     string
+	frame   *data.Frame
+	crumbs  []string
+	ns      string
 	backend db.Backend
 }
 
-func (c infoTestCtx) CurrentFrame() *data.Frame { return c.frame }
-func (c infoTestCtx) CurrentRow() int           { return 0 }
-func (c infoTestCtx) SheetFieldCursor() int     { return 0 }
+func (c infoTestCtx) CurrentFrame() *data.Frame     { return c.frame }
+func (c infoTestCtx) CurrentRow() int               { return 0 }
+func (c infoTestCtx) SheetFieldCursor() int         { return 0 }
 func (c infoTestCtx) CurrentTableNamespace() string { return c.ns }
 func (c infoTestCtx) BaseCrumb() string {
 	if len(c.crumbs) > 0 {
@@ -32,20 +32,20 @@ func (c infoTestCtx) BaseCrumb() string {
 	}
 	return ""
 }
-func (c infoTestCtx) Crumbs() []string      { return c.crumbs }
-func (c infoTestCtx) ColumnNames() []string { return nil }
-func (c infoTestCtx) Engine() *query.Engine { return nil }
-func (c infoTestCtx) TableNames() []string  { return nil }
-func (c infoTestCtx) Backend() db.Backend   { return c.backend }
-func (c infoTestCtx) KV() db.KVBackend      { return nil }
-func (c infoTestCtx) Theme() *theme.Theme   { return nil }
-func (c infoTestCtx) ThemeName() string     { return "" }
-func (c infoTestCtx) ShowBorders() bool     { return false }
-func (c infoTestCtx) ShowRowNumbers() bool  { return false }
-func (c infoTestCtx) Tabs() []ui.TabInfo    { return nil }
-func (c infoTestCtx) ActiveTab() int        { return 0 }
-func (c infoTestCtx) ActivePaneID() int     { return 0 }
-func (c infoTestCtx) PendingEdit() *ui.PendingEdit   { return nil }
+func (c infoTestCtx) Crumbs() []string                 { return c.crumbs }
+func (c infoTestCtx) ColumnNames() []string            { return nil }
+func (c infoTestCtx) Engine() *query.Engine            { return nil }
+func (c infoTestCtx) TableNames() []string             { return nil }
+func (c infoTestCtx) Backend() db.Backend              { return c.backend }
+func (c infoTestCtx) KV() db.KVBackend                 { return nil }
+func (c infoTestCtx) Theme() *theme.Theme              { return nil }
+func (c infoTestCtx) ThemeName() string                { return "" }
+func (c infoTestCtx) ShowBorders() bool                { return false }
+func (c infoTestCtx) ShowRowNumbers() bool             { return false }
+func (c infoTestCtx) Tabs() []ui.TabInfo               { return nil }
+func (c infoTestCtx) ActiveTab() int                   { return 0 }
+func (c infoTestCtx) ActivePaneID() int                { return 0 }
+func (c infoTestCtx) PendingEdit() *ui.PendingEdit     { return nil }
 func (c infoTestCtx) PendingDelete() *ui.PendingDelete { return nil }
 
 // infoTestBackend is a stub db.Backend for info overlay tests; ColumnsMeta
@@ -55,9 +55,11 @@ type infoTestBackend struct {
 	err  error
 }
 
-func (b *infoTestBackend) Kind() string                  { return "stub" }
-func (b *infoTestBackend) Title() string                 { return "stub://db" }
-func (b *infoTestBackend) Run(string) (db.Result, error) { return db.Result{}, errors.New("not implemented") }
+func (b *infoTestBackend) Kind() string  { return "stub" }
+func (b *infoTestBackend) Title() string { return "stub://db" }
+func (b *infoTestBackend) Run(string) (db.Result, error) {
+	return db.Result{}, errors.New("not implemented")
+}
 func (b *infoTestBackend) Namespaces() ([]string, error) { return []string{""}, nil }
 func (b *infoTestBackend) Tables(string) ([]string, error) {
 	return nil, errors.New("not implemented")
@@ -76,9 +78,9 @@ func (b *infoTestBackend) Close() error { return nil }
 
 func infoTestFrame() *data.Frame {
 	return &data.Frame{Columns: []data.Column{
-		{Name: "id", Type: data.TypeInt, Cells: []any{int64(1), int64(2), nil}},
-		{Name: "name", Type: data.TypeString, Cells: []any{"a", nil, nil}},
-		{Name: "score", Type: data.TypeFloat, Cells: []any{1.5, 2.5, 3.5}},
+		data.NewColumn("id", data.TypeInt, []any{int64(1), int64(2), nil}),
+		data.NewColumn("name", data.TypeString, []any{"a", nil, nil}),
+		data.NewColumn("score", data.TypeFloat, []any{1.5, 2.5, 3.5}),
 	}}
 }
 
@@ -157,9 +159,9 @@ func TestInfoScrollClamp(t *testing.T) {
 	// Frame with many columns so the list must scroll.
 	f := &data.Frame{}
 	for i := 0; i < 40; i++ {
-		f.Columns = append(f.Columns, data.Column{
-			Name: "c" + strings.Repeat("x", i%5), Type: data.TypeString, Cells: []any{nil},
-		})
+		f.Columns = append(f.Columns, data.NewColumn(
+			"c"+strings.Repeat("x", i%5), data.TypeString, []any{nil},
+		))
 	}
 	o := newInfoOverlay(infoTestCtx{frame: f, crumbs: []string{"t"}}, f)
 	th := infoTestTheme(t)
@@ -351,7 +353,7 @@ func TestInfoIgnoresStaleMetaMsg(t *testing.T) {
 func TestInfoCtrlDNotPageDown(t *testing.T) {
 	f := &data.Frame{}
 	for i := 0; i < 40; i++ {
-		f.Columns = append(f.Columns, data.Column{Name: "c", Type: data.TypeString, Cells: []any{nil}})
+		f.Columns = append(f.Columns, data.NewColumn("c", data.TypeString, []any{nil}))
 	}
 	o := newInfoOverlay(infoTestCtx{frame: f, crumbs: []string{"t"}}, f)
 	o.View(80, 20, infoTestTheme(t)) // establish viewRows

@@ -454,4 +454,3 @@ func (e *exporter) viewOptions(th *theme.Theme) []string {
 	}
 	return nil
 }
-

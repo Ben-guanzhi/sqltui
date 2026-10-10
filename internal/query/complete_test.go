@@ -353,8 +353,8 @@ func TestEngineTableColumns(t *testing.T) {
 	}
 
 	if err := e.Register("people", &data.Frame{Columns: []data.Column{
-		{Name: "name", Type: data.TypeString, Cells: []any{"a"}},
-		{Name: "age", Type: data.TypeInt, Cells: []any{int64(1)}},
+		data.NewColumn("name", data.TypeString, []any{"a"}),
+		data.NewColumn("age", data.TypeInt, []any{int64(1)}),
 	}}); err != nil {
 		t.Fatal(err)
 	}

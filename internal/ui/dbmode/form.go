@@ -308,7 +308,8 @@ func (o *connForm) values() map[string]string {
 var dialer = dial
 
 // dial opens the connection for one kind. Exactly one of the returned
-// backends is non-nil on success; the connection is tracked for shutdown.
+// backends is non-nil on success; whoever attaches it (the app, via
+// SetBackendMsg) owns it and closes it on replacement or exit.
 func dial(kind string, v map[string]string) (db.Backend, db.KVBackend, error) {
 	if spec, ok := engineSpecs[kind]; ok {
 		return spec.dial(v)
@@ -340,14 +341,6 @@ func (o *connForm) startConnect() tea.Cmd {
 	kind, vals := o.kind, o.values()
 	return func() tea.Msg {
 		be, kv, err := dialer(kind, vals)
-		if err == nil {
-			if be != nil {
-				conns.track(be)
-			}
-			if kv != nil {
-				conns.track(kv)
-			}
-		}
 		return connDoneMsg{kind: kind, vals: vals, be: be, kv: kv, err: err}
 	}
 }

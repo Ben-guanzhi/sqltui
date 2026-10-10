@@ -43,10 +43,12 @@ func (b *schemaTestBackend) Tables(ns string) ([]string, error) {
 func (b *schemaTestBackend) FetchTable(string, string, int) (*data.Frame, error) {
 	return nil, errors.New("not implemented")
 }
-func (b *schemaTestBackend) PrimaryKeys(string, string) ([]string, error)                { return nil, nil }
-func (b *schemaTestBackend) ColumnsMeta(string, string) ([]db.ColumnMeta, error)         { return nil, nil }
-func (b *schemaTestBackend) ColumnIndexTypes(string, string) (map[string]string, error)  { return nil, nil }
-func (b *schemaTestBackend) Close() error                                                { return nil }
+func (b *schemaTestBackend) PrimaryKeys(string, string) ([]string, error)        { return nil, nil }
+func (b *schemaTestBackend) ColumnsMeta(string, string) ([]db.ColumnMeta, error) { return nil, nil }
+func (b *schemaTestBackend) ColumnIndexTypes(string, string) (map[string]string, error) {
+	return nil, nil
+}
+func (b *schemaTestBackend) Close() error { return nil }
 
 // schemaTestBackendNS additionally reports a connected namespace through the
 // optional CurrentNamespace interface.
@@ -64,25 +66,25 @@ type schemaTestCtx struct {
 	backend db.Backend
 }
 
-func (c schemaTestCtx) CurrentFrame() *data.Frame { return nil }
-func (c schemaTestCtx) CurrentRow() int           { return 0 }
-func (c schemaTestCtx) SheetFieldCursor() int     { return 0 }
-func (c schemaTestCtx) CurrentTableNamespace() string { return "" }
-func (c schemaTestCtx) BaseCrumb() string         { return "" }
-func (c schemaTestCtx) Crumbs() []string          { return nil }
-func (c schemaTestCtx) ColumnNames() []string     { return nil }
-func (c schemaTestCtx) Engine() *query.Engine     { return nil }
-func (c schemaTestCtx) TableNames() []string      { return nil }
-func (c schemaTestCtx) Backend() db.Backend       { return c.backend }
-func (c schemaTestCtx) KV() db.KVBackend          { return nil }
-func (c schemaTestCtx) Theme() *theme.Theme       { return nil }
-func (c schemaTestCtx) ThemeName() string         { return "" }
-func (c schemaTestCtx) ShowBorders() bool         { return false }
-func (c schemaTestCtx) ShowRowNumbers() bool      { return false }
-func (c schemaTestCtx) Tabs() []ui.TabInfo        { return c.tabs }
-func (c schemaTestCtx) ActiveTab() int            { return c.active }
-func (c schemaTestCtx) ActivePaneID() int         { return 0 }
-func (c schemaTestCtx) PendingEdit() *ui.PendingEdit   { return nil }
+func (c schemaTestCtx) CurrentFrame() *data.Frame        { return nil }
+func (c schemaTestCtx) CurrentRow() int                  { return 0 }
+func (c schemaTestCtx) SheetFieldCursor() int            { return 0 }
+func (c schemaTestCtx) CurrentTableNamespace() string    { return "" }
+func (c schemaTestCtx) BaseCrumb() string                { return "" }
+func (c schemaTestCtx) Crumbs() []string                 { return nil }
+func (c schemaTestCtx) ColumnNames() []string            { return nil }
+func (c schemaTestCtx) Engine() *query.Engine            { return nil }
+func (c schemaTestCtx) TableNames() []string             { return nil }
+func (c schemaTestCtx) Backend() db.Backend              { return c.backend }
+func (c schemaTestCtx) KV() db.KVBackend                 { return nil }
+func (c schemaTestCtx) Theme() *theme.Theme              { return nil }
+func (c schemaTestCtx) ThemeName() string                { return "" }
+func (c schemaTestCtx) ShowBorders() bool                { return false }
+func (c schemaTestCtx) ShowRowNumbers() bool             { return false }
+func (c schemaTestCtx) Tabs() []ui.TabInfo               { return c.tabs }
+func (c schemaTestCtx) ActiveTab() int                   { return c.active }
+func (c schemaTestCtx) ActivePaneID() int                { return 0 }
+func (c schemaTestCtx) PendingEdit() *ui.PendingEdit     { return nil }
 func (c schemaTestCtx) PendingDelete() *ui.PendingDelete { return nil }
 
 // schemaTestMsgs runs a cmd (possibly a batch) and collects all messages.

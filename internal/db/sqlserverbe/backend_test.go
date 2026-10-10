@@ -188,3 +188,16 @@ func TestBackendCurrentNamespace(t *testing.T) {
 		t.Errorf("CurrentNamespace() with nil db = %q, want empty", got)
 	}
 }
+
+func TestTableTarget(t *testing.T) {
+	b := &Backend{}
+	if got := b.TableTarget("shop", "orders"); got != "[shop].dbo.[orders]" {
+		t.Errorf("qualified = %s, want [shop].dbo.[orders]", got)
+	}
+	if got := b.TableTarget("", "orders"); got != "[orders]" {
+		t.Errorf("bare = %s, want [orders]", got)
+	}
+	if got := b.TableTarget("shop", "we]ird"); got != "[shop].dbo.[we]]ird]" {
+		t.Errorf("escaped = %s, want bracket-doubled", got)
+	}
+}

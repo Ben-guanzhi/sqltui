@@ -7,7 +7,6 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -27,14 +26,6 @@ const (
 
 	// max rows fetched when browsing a table from the tree view
 	FetchLimit = 200
-)
-
-var (
-	DbClient *DB
-	// clientMu serializes the check-close-assign swap of DbClient: dial
-	// commands run in goroutines and two overlapping reconnects must not
-	// race on the global client.
-	clientMu sync.Mutex
 )
 
 type DB struct {
@@ -72,18 +63,11 @@ func NewDB(dsn string, dbName string) (*DB, error) {
 		return nil, fmt.Errorf("ping: %w", err)
 	}
 
-	clientMu.Lock()
-	defer clientMu.Unlock()
-	if DbClient != nil {
-		DbClient.conn.Close(context.Background())
-	}
-
-	DbClient = &DB{
+	return &DB{
 		conn:   conn,
 		dsn:    dsn,
 		dbName: dbName,
-	}
-	return DbClient, nil
+	}, nil
 }
 
 type RawCommandResult struct {

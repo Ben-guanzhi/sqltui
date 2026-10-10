@@ -7,8 +7,8 @@ import (
 
 func TestWithCell(t *testing.T) {
 	f := frameOf(
-		Column{Name: "id", Type: TypeInt, Cells: []any{int64(1), int64(2), int64(3)}},
-		Column{Name: "name", Type: TypeString, Cells: []any{"ann", "bob", "cyd"}},
+		Column{Name: "id", Type: TypeInt, cells: []any{int64(1), int64(2), int64(3)}},
+		Column{Name: "name", Type: TypeString, cells: []any{"ann", "bob", "cyd"}},
 	)
 
 	got := f.WithCell(1, 1, "BOB")
@@ -34,8 +34,8 @@ func TestWithCell(t *testing.T) {
 	if f.CellString(1, 1) != "bob" {
 		t.Errorf("original frame mutated: cell(1,1) = %q, want bob", f.CellString(1, 1))
 	}
-	if !reflect.DeepEqual(f.Columns[1].Cells, []any{"ann", "bob", "cyd"}) {
-		t.Errorf("original column cells mutated: %#v", f.Columns[1].Cells)
+	if !reflect.DeepEqual(f.Columns[1].cells, []any{"ann", "bob", "cyd"}) {
+		t.Errorf("original column cells mutated: %#v", f.Columns[1].cells)
 	}
 
 	// WithCell on a typed column keeps the column type even when the new
@@ -51,8 +51,8 @@ func TestWithCell(t *testing.T) {
 
 func TestWithoutRows(t *testing.T) {
 	f := frameOf(
-		Column{Name: "id", Type: TypeInt, Cells: []any{int64(1), int64(2), int64(3), int64(4)}},
-		Column{Name: "name", Type: TypeString, Cells: []any{"ann", "bob", "cyd", "dan"}},
+		Column{Name: "id", Type: TypeInt, cells: []any{int64(1), int64(2), int64(3), int64(4)}},
+		Column{Name: "name", Type: TypeString, cells: []any{"ann", "bob", "cyd", "dan"}},
 	)
 
 	// Removing a middle row drops only it.
@@ -98,11 +98,11 @@ func TestWithoutRows(t *testing.T) {
 	if f.NumRows() != 4 {
 		t.Errorf("original NumRows = %d, want 4", f.NumRows())
 	}
-	if !reflect.DeepEqual(f.Columns[0].Cells, []any{int64(1), int64(2), int64(3), int64(4)}) {
-		t.Errorf("original col 0 mutated: %#v", f.Columns[0].Cells)
+	if !reflect.DeepEqual(f.Columns[0].cells, []any{int64(1), int64(2), int64(3), int64(4)}) {
+		t.Errorf("original col 0 mutated: %#v", f.Columns[0].cells)
 	}
-	if !reflect.DeepEqual(f.Columns[1].Cells, []any{"ann", "bob", "cyd", "dan"}) {
-		t.Errorf("original col 1 mutated: %#v", f.Columns[1].Cells)
+	if !reflect.DeepEqual(f.Columns[1].cells, []any{"ann", "bob", "cyd", "dan"}) {
+		t.Errorf("original col 1 mutated: %#v", f.Columns[1].cells)
 	}
 
 	// Column types are preserved.
@@ -114,8 +114,8 @@ func TestWithoutRows(t *testing.T) {
 
 	// Removing the only row of a 1-row frame yields 0 rows.
 	one := frameOf(
-		Column{Name: "id", Type: TypeInt, Cells: []any{int64(7)}},
-		Column{Name: "name", Type: TypeString, Cells: []any{"solo"}},
+		Column{Name: "id", Type: TypeInt, cells: []any{int64(7)}},
+		Column{Name: "name", Type: TypeString, cells: []any{"solo"}},
 	)
 	got = one.WithoutRows([]int{0})
 	if got.NumRows() != 0 {

@@ -55,6 +55,7 @@ type Backend struct {
 }
 
 var _ db.Backend = (*Backend)(nil)
+var _ db.TableTargeter = (*Backend)(nil)
 
 // Connect opens a SQL Server connection, validates the config, pings the
 // server, and returns a ready-to-use Backend.
@@ -143,6 +144,17 @@ func (b *Backend) Tables(namespace string) ([]string, error) {
 	return b.db.ShowDatabaseTables(namespace)
 }
 
+// TableTarget spells namespace.table as [ns].dbo.[tbl] (SQL Server requires
+// three-part naming, so a non-empty namespace defaults to the dbo schema);
+// an empty namespace yields just [tbl].
+func (b *Backend) TableTarget(namespace, table string) string {
+	ident := db.QuoteIdentBracket(table)
+	if namespace != "" {
+		ident = db.QuoteIdentBracket(namespace) + ".dbo." + ident
+	}
+	return ident
+}
+
 // FetchTable loads up to limit rows of namespace.table, preserving native
 // Go types for accurate display. SQL Server requires three-part naming:
 // [database].[schema].[table], so we default to the dbo schema.
@@ -152,11 +164,7 @@ func (b *Backend) FetchTable(namespace, table string, limit int) (*data.Frame, e
 	} else if limit > 10000 {
 		limit = 10000
 	}
-	ident := db.QuoteIdentBracket(table)
-	if namespace != "" {
-		ident = db.QuoteIdentBracket(namespace) + ".dbo." + ident
-	}
-	query := fmt.Sprintf("SELECT TOP %d * FROM %s", limit, ident)
+	query := fmt.Sprintf("SELECT TOP %d * FROM %s", limit, b.TableTarget(namespace, table))
 	return b.queryFrame(query)
 }
 

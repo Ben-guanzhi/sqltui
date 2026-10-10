@@ -47,12 +47,12 @@ type columnsMetaMsg struct {
 // listing is refreshed asynchronously from live column metadata; in file mode
 // it falls back to the frame's inferred DType.
 type infoOverlay struct {
-	ctx      ui.AppContext
-	frame    *data.Frame
-	loading  bool
-	meta     []db.ColumnMeta
-	indexes  map[string]string
-	loadErr  string
+	ctx     ui.AppContext
+	frame   *data.Frame
+	loading bool
+	meta    []db.ColumnMeta
+	indexes map[string]string
+	loadErr string
 
 	title  string
 	crumbs []string

@@ -88,6 +88,36 @@ func TestAppTabSwitchAndApplyFrame(t *testing.T) {
 	}
 }
 
+func TestTableSourceRecordedByTableOpen(t *testing.T) {
+	a := newTestApp(t)
+
+	// File-loaded tabs record no source table.
+	if ns, table := a.TableSource(); ns != "" || table != "" {
+		t.Fatalf("file tab source = %q/%q, want empty", ns, table)
+	}
+
+	// A table-open tab records its source; pushed frames keep it.
+	a.Update(ApplyFrameMsg{Frame: testFrame(5), NewTab: true, TabTitle: "orders",
+		SourceNamespace: "sales", SourceTable: "orders"})
+	if ns, table := a.TableSource(); ns != "sales" || table != "orders" {
+		t.Fatalf("source = %q/%q, want sales/orders", ns, table)
+	}
+	a.Update(ApplyFrameMsg{Frame: testFrame(2), Crumb: "filter", PaneID: a.ActivePaneID()})
+	if ns, table := a.TableSource(); ns != "sales" || table != "orders" {
+		t.Fatalf("source after push = %q/%q, want sales/orders", ns, table)
+	}
+
+	// A query-result tab records nothing, even beside a table tab.
+	a.Update(ApplyFrameMsg{Frame: testFrame(2), Crumb: "query", NewTab: true, TabTitle: "select x"})
+	if ns, table := a.TableSource(); ns != "" || table != "" {
+		t.Fatalf("query tab source = %q/%q, want empty", ns, table)
+	}
+	a.Update(key("H"))
+	if ns, table := a.TableSource(); ns != "sales" || table != "orders" {
+		t.Fatalf("source after tab switch back = %q/%q, want sales/orders", ns, table)
+	}
+}
+
 func TestAppPopSemantics(t *testing.T) {
 	a := newTestApp(t)
 	a.Update(ApplyFrameMsg{Frame: testFrame(3), Crumb: "filter"})
@@ -608,16 +638,16 @@ func TestEscEmptyWorkspaceFileModeNoop(t *testing.T) {
 // fakeBackend is a minimal db.Backend for status bar tests.
 type fakeBackend struct{}
 
-func (fakeBackend) Kind() string                                        { return "mysql" }
-func (fakeBackend) Title() string                                       { return "mysql://h/db" }
-func (fakeBackend) Run(string) (db.Result, error)                       { return db.Result{}, nil }
-func (fakeBackend) Namespaces() ([]string, error)                       { return nil, nil }
-func (fakeBackend) Tables(string) ([]string, error)                     { return nil, nil }
-func (fakeBackend) FetchTable(string, string, int) (*data.Frame, error) { return nil, nil }
-func (fakeBackend) PrimaryKeys(string, string) ([]string, error)                     { return nil, nil }
-func (fakeBackend) ColumnsMeta(string, string) ([]db.ColumnMeta, error)             { return nil, nil }
-func (fakeBackend) ColumnIndexTypes(string, string) (map[string]string, error)      { return nil, nil }
-func (fakeBackend) Close() error                                                     { return nil }
+func (fakeBackend) Kind() string                                               { return "mysql" }
+func (fakeBackend) Title() string                                              { return "mysql://h/db" }
+func (fakeBackend) Run(string) (db.Result, error)                              { return db.Result{}, nil }
+func (fakeBackend) Namespaces() ([]string, error)                              { return nil, nil }
+func (fakeBackend) Tables(string) ([]string, error)                            { return nil, nil }
+func (fakeBackend) FetchTable(string, string, int) (*data.Frame, error)        { return nil, nil }
+func (fakeBackend) PrimaryKeys(string, string) ([]string, error)               { return nil, nil }
+func (fakeBackend) ColumnsMeta(string, string) ([]db.ColumnMeta, error)        { return nil, nil }
+func (fakeBackend) ColumnIndexTypes(string, string) (map[string]string, error) { return nil, nil }
+func (fakeBackend) Close() error                                               { return nil }
 
 func TestAppStatusBarConnectionTitle(t *testing.T) {
 	a := New(Options{

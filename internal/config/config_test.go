@@ -1,10 +1,10 @@
 package config
 
 import (
-	"runtime"
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"gopkg.in/yaml.v3"

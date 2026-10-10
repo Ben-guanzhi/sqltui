@@ -19,13 +19,13 @@ import (
 // popup that collects the new value populates this and the app commits it
 // via the "saveedit" command.
 type PendingEdit struct {
-	Frame    *data.Frame
-	Row      int
-	Col      int
-	ColName  string
-	OldValue string
-	NewValue string
-	Table    string
+	Frame     *data.Frame
+	Row       int
+	Col       int
+	ColName   string
+	OldValue  string
+	NewValue  string
+	Table     string
 	Namespace string
 }
 
@@ -33,9 +33,9 @@ type PendingEdit struct {
 // it from the multi-select set (or the single cursor row) and commits it via
 // the "deleterows" command.
 type PendingDelete struct {
-	Frame    *data.Frame
-	Rows     []int
-	Table    string
+	Frame     *data.Frame
+	Rows      []int
+	Table     string
 	Namespace string
 }
 

@@ -38,7 +38,7 @@ func (parquetWriter) Write(w io.Writer, f *data.Frame, opt Options) error {
 	for r := 0; r < f.NumRows(); r++ {
 		row := make(pq.Row, len(f.Columns))
 		for c, col := range f.Columns {
-			row[c] = cellValue(col.Cells[r], col.Type, c)
+			row[c] = cellValue(col.Cell(r), col.Type, c)
 		}
 		rows = append(rows, row)
 		if len(rows) == batch {

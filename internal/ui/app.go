@@ -61,6 +61,10 @@ type App struct {
 	pendingEdit   *PendingEdit
 	pendingDelete *PendingDelete
 
+	// schemaC is this app's completion-schema snapshot (see app_schema.go).
+	// Created once in New; its own mutex guards every access.
+	schemaC *schemaCache
+
 	// syncedFrame caches the frame last registered as "_" (see ensureSynced).
 	syncedFrame *data.Frame
 
@@ -86,6 +90,7 @@ func New(opts Options) *App {
 		engine:         opts.Engine,
 		backend:        opts.Backend,
 		kv:             opts.KV,
+		schemaC:        &schemaCache{},
 		width:          80,
 		height:         24,
 	}
@@ -95,10 +100,27 @@ func New(opts Options) *App {
 	return a
 }
 
-// Run drives the app to completion on the terminal.
+// Run drives the app to completion on the terminal. Whatever live
+// connections the app owns are closed when the program returns, so every
+// exit path (last tab closed, quit, crash-recoverable return) drops them.
 func Run(app *App) error {
 	_, err := tea.NewProgram(app).Run()
+	app.CloseConnections()
 	return err
+}
+
+// CloseConnections closes the live SQL backend and key-value connection the
+// app currently holds (both nil-safe). The replacement path in SetBackendMsg
+// uses the same policy: a superseded connection is closed immediately.
+func (a *App) CloseConnections() {
+	if a.backend != nil {
+		_ = a.backend.Close() // best effort on teardown
+		a.backend = nil
+	}
+	if a.kv != nil {
+		_ = a.kv.Close()
+		a.kv = nil
+	}
 }
 
 // --- tea.Model ---------------------------------------------------------------
@@ -118,10 +140,16 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case SetBackendMsg:
-		if m.Backend != nil {
+		if m.Backend != nil && m.Backend != a.backend {
+			if a.backend != nil {
+				_ = a.backend.Close() // superseded: a reconnect replaces it
+			}
 			a.backend = m.Backend
 		}
-		if m.KV != nil {
+		if m.KV != nil && m.KV != a.kv {
+			if a.kv != nil {
+				_ = a.kv.Close()
+			}
 			a.kv = m.KV
 		}
 		return a, nil
@@ -1304,6 +1332,7 @@ func (a *App) applyFrame(m ApplyFrameMsg) tea.Cmd {
 		}
 		p := NewPane(title, m.Frame)
 		p.TableCols = m.TableCols
+		p.sourceNS, p.sourceTable = m.SourceNamespace, m.SourceTable
 		a.tabs = append(a.tabs, p)
 		a.active = len(a.tabs) - 1
 	} else {
@@ -1508,6 +1537,16 @@ func (a *App) BaseCrumb() string {
 		return p.Title
 	}
 	return ""
+}
+
+// TableSource reports the live table the active pane's base frame was
+// fetched from (namespace may be empty for engines without namespaces; the
+// table is empty when the pane did not originate from a table fetch).
+func (a *App) TableSource() (namespace, table string) {
+	if p := a.pane(); p != nil {
+		return p.sourceNS, p.sourceTable
+	}
+	return "", ""
 }
 
 func (a *App) Crumbs() []string {

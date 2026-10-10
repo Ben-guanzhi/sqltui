@@ -15,6 +15,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/LinPr/sqltui/internal/data"
+	"github.com/LinPr/sqltui/internal/db"
 	"github.com/LinPr/sqltui/internal/query"
 	"github.com/LinPr/sqltui/internal/theme"
 	"github.com/LinPr/sqltui/internal/ui"
@@ -77,19 +78,37 @@ func qxQuoteIdent(s string) string {
 	return `"` + strings.ReplaceAll(s, `"`, `""`) + `"`
 }
 
+// qxTableSource is the optional AppContext extension reporting the live
+// table the active pane was fetched from (empty table when the pane came
+// from a query or a file rather than a table open).
+type qxTableSource interface {
+	TableSource() (namespace, table string)
+}
+
 // qxTarget returns the quoted table name the inline prompts run against. In
 // file mode the app keeps the frame under view registered as "_", so the
-// prompts always target that alias. In live database mode there is no "_"
-// alias; we fall back to the current tab title, which by convention is the
-// name of the table the tab was loaded from. That is a heuristic: tabs opened
-// from full query results carry a statement fragment as their title and the
-// resulting SQL will simply fail with a clear engine error. Quoting is
-// dialect-aware: mysql rejects double-quoted identifiers by default (they are
-// string literals without ANSI_QUOTES), so it gets backticks.
+// prompts always target that alias. In live database mode the pane records
+// the real namespace/table it was opened from (Pane source metadata), which
+// is spelled into SQL by the backend's own TableTarget — the same spelling
+// FetchTable used, including the namespace qualifier. When no source is
+// recorded (tabs opened from full query results) we fall back to the
+// current tab title, which by convention is the name of the table the tab
+// was loaded from. That fallback is a heuristic and the resulting SQL will
+// simply fail with a clear engine error. Quoting is dialect-aware: mysql
+// rejects double-quoted identifiers by default (they are string literals
+// without ANSI_QUOTES), so the fallback gets backticks.
 func qxTarget(ctx ui.AppContext) string {
 	be := ctx.Backend()
 	if be == nil && ctx.Engine() != nil {
 		return qxQuoteIdent("_")
+	}
+	if ts, ok := ctx.(qxTableSource); ok {
+		if ns, table := ts.TableSource(); table != "" {
+			if tt, ok := be.(db.TableTargeter); ok {
+				return tt.TableTarget(ns, table)
+			}
+			return qxQuoteIdent(table)
+		}
 	}
 	if be != nil && be.Kind() == "mysql" {
 		return "`" + strings.ReplaceAll(ctx.BaseCrumb(), "`", "``") + "`"

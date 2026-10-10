@@ -140,8 +140,8 @@ func casterTestEngine(t *testing.T) *query.Engine {
 	t.Cleanup(func() { e.Close() })
 
 	f := &data.Frame{Columns: []data.Column{
-		{Name: "id", Type: data.TypeString, Cells: []any{"1", "2", "3"}},
-		{Name: "name", Type: data.TypeString, Cells: []any{"x", "y", "z"}},
+		data.NewColumn("id", data.TypeString, []any{"1", "2", "3"}),
+		data.NewColumn("name", data.TypeString, []any{"x", "y", "z"}),
 	}}
 	if err := e.Register("_", f); err != nil {
 		t.Fatalf("register: %v", err)

@@ -6,7 +6,6 @@ package dbmode
 
 import (
 	"fmt"
-	"io"
 	"strings"
 	"sync"
 
@@ -27,7 +26,7 @@ const (
 
 // Run starts the UI in database mode for one engine kind: no tabs, no
 // embedded engine, a connection form as the initial overlay. It returns when
-// the UI exits and closes any connection made during the session.
+// the UI exits; ui.Run closes whatever live connection the app attached.
 func Run(kind string) error {
 	switch kind {
 	case KindMysql, KindPostgres, KindRedis, KindOpenObserve, KindSqlServer, KindOracle:
@@ -49,8 +48,7 @@ func Run(kind string) error {
 	})
 	app.PushOverlay(newConnForm(app, kind))
 
-	runErr := ui.Run(app)
-	conns.closeAll()
+	runErr := ui.Run(app) // closes the app's live connections on exit
 	return runErr
 }
 
@@ -128,36 +126,6 @@ func RegisterFactories(kind string) {
 			return origSchema(ctx, arg)
 		}
 		return nil, fmt.Errorf("schema: no connection")
-	}
-}
-
-// --- connection tracking --------------------------------------------------------
-
-// conns remembers every live connection opened by the connection form so Run
-// can close them when the UI exits.
-var conns = &connTracker{}
-
-type connTracker struct {
-	mu   sync.Mutex
-	open []io.Closer
-}
-
-func (t *connTracker) track(c io.Closer) {
-	if c == nil {
-		return
-	}
-	t.mu.Lock()
-	t.open = append(t.open, c)
-	t.mu.Unlock()
-}
-
-func (t *connTracker) closeAll() {
-	t.mu.Lock()
-	open := t.open
-	t.open = nil
-	t.mu.Unlock()
-	for _, c := range open {
-		_ = c.Close() // best effort on shutdown
 	}
 }
 

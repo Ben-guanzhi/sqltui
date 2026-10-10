@@ -14,13 +14,13 @@ func fixtureFrame() *data.Frame {
 	d1 := time.Date(2024, 3, 15, 0, 0, 0, 0, time.UTC)
 	dt1 := time.Date(2024, 3, 15, 10, 30, 45, 0, time.UTC)
 	return &data.Frame{Columns: []data.Column{
-		{Name: "s", Type: data.TypeString, Cells: []any{"hello", nil, "wörld"}},
-		{Name: "i", Type: data.TypeInt, Cells: []any{int64(1), nil, int64(-42)}},
-		{Name: "f", Type: data.TypeFloat, Cells: []any{1.5, nil, -0.25}},
-		{Name: "b", Type: data.TypeBool, Cells: []any{true, nil, false}},
-		{Name: "d", Type: data.TypeDate, Cells: []any{d1, nil, d1}},
-		{Name: "dt", Type: data.TypeDatetime, Cells: []any{dt1, nil, dt1}},
-		{Name: `weird "name`, Type: data.TypeString, Cells: []any{"x", nil, `y"z`}},
+		data.NewColumn("s", data.TypeString, []any{"hello", nil, "wörld"}),
+		data.NewColumn("i", data.TypeInt, []any{int64(1), nil, int64(-42)}),
+		data.NewColumn("f", data.TypeFloat, []any{1.5, nil, -0.25}),
+		data.NewColumn("b", data.TypeBool, []any{true, nil, false}),
+		data.NewColumn("d", data.TypeDate, []any{d1, nil, d1}),
+		data.NewColumn("dt", data.TypeDatetime, []any{dt1, nil, dt1}),
+		data.NewColumn(`weird "name`, data.TypeString, []any{"x", nil, `y"z`}),
 	}}
 }
 
@@ -72,8 +72,8 @@ func TestRegisterRoundtrip(t *testing.T) {
 		if c.Type != wantTypes[i] {
 			t.Errorf("column %q type = %v, want %v", c.Name, c.Type, wantTypes[i])
 		}
-		if !reflect.DeepEqual(c.Cells, wantCells[i]) {
-			t.Errorf("column %q cells = %#v, want %#v", c.Name, c.Cells, wantCells[i])
+		if !reflect.DeepEqual(c.Values(), wantCells[i]) {
+			t.Errorf("column %q cells = %#v, want %#v", c.Name, c.Values(), wantCells[i])
 		}
 	}
 }
@@ -83,7 +83,7 @@ func TestRegisterReplacesAndWeirdTableNames(t *testing.T) {
 	name := `my "table", yes!`
 
 	f1 := &data.Frame{Columns: []data.Column{
-		{Name: "a", Type: data.TypeInt, Cells: []any{int64(1), int64(2)}},
+		data.NewColumn("a", data.TypeInt, []any{int64(1), int64(2)}),
 	}}
 	if err := e.Register(name, f1); err != nil {
 		t.Fatalf("Register #1: %v", err)
@@ -91,7 +91,7 @@ func TestRegisterReplacesAndWeirdTableNames(t *testing.T) {
 
 	// Re-registering must replace, not append.
 	f2 := &data.Frame{Columns: []data.Column{
-		{Name: "a", Type: data.TypeInt, Cells: []any{int64(9)}},
+		data.NewColumn("a", data.TypeInt, []any{int64(9)}),
 	}}
 	if err := e.Register(name, f2); err != nil {
 		t.Fatalf("Register #2: %v", err)
@@ -109,7 +109,7 @@ func TestRegisterReplacesAndWeirdTableNames(t *testing.T) {
 func TestQueryDuplicateColumnNames(t *testing.T) {
 	e := newTestEngine(t)
 	f := &data.Frame{Columns: []data.Column{
-		{Name: "a", Type: data.TypeInt, Cells: []any{int64(7)}},
+		data.NewColumn("a", data.TypeInt, []any{int64(7)}),
 	}}
 	if err := e.Register("t", f); err != nil {
 		t.Fatalf("Register: %v", err)
@@ -132,7 +132,7 @@ func TestQueryDuplicateColumnNames(t *testing.T) {
 func TestQueryExpressionTypes(t *testing.T) {
 	e := newTestEngine(t)
 	f := &data.Frame{Columns: []data.Column{
-		{Name: "n", Type: data.TypeInt, Cells: []any{int64(1), int64(2), int64(3)}},
+		data.NewColumn("n", data.TypeInt, []any{int64(1), int64(2), int64(3)}),
 	}}
 	if err := e.Register("t", f); err != nil {
 		t.Fatalf("Register: %v", err)
@@ -178,7 +178,7 @@ func TestQueryWhereOnRegisteredValues(t *testing.T) {
 func TestTablesAndUnregister(t *testing.T) {
 	e := newTestEngine(t)
 	f := &data.Frame{Columns: []data.Column{
-		{Name: "a", Type: data.TypeString, Cells: nil},
+		data.NewColumn("a", data.TypeString, nil),
 	}}
 	for _, n := range []string{"zebra", "_", "with space"} {
 		if err := e.Register(n, f); err != nil {
@@ -224,8 +224,8 @@ func TestRegisterErrors(t *testing.T) {
 func TestRegisterDuplicateFrameColumns(t *testing.T) {
 	e := newTestEngine(t)
 	f := &data.Frame{Columns: []data.Column{
-		{Name: "a", Type: data.TypeInt, Cells: []any{int64(1)}},
-		{Name: "a", Type: data.TypeString, Cells: []any{"x"}},
+		data.NewColumn("a", data.TypeInt, []any{int64(1)}),
+		data.NewColumn("a", data.TypeString, []any{"x"}),
 	}}
 	if err := e.Register("t", f); err != nil {
 		t.Fatalf("Register with duplicate columns: %v", err)
@@ -254,8 +254,8 @@ func TestQueryBooleanDecltype(t *testing.T) {
 		t.Errorf("type = %v, want bool", got.Columns[0].Type)
 	}
 	want := []any{true, false, nil}
-	if !reflect.DeepEqual(got.Columns[0].Cells, want) {
-		t.Errorf("cells = %#v, want %#v", got.Columns[0].Cells, want)
+	if !reflect.DeepEqual(got.Columns[0].Values(), want) {
+		t.Errorf("cells = %#v, want %#v", got.Columns[0].Values(), want)
 	}
 }
 

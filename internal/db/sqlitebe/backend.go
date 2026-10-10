@@ -18,6 +18,7 @@ type Backend struct {
 }
 
 var _ db.Backend = (*Backend)(nil)
+var _ db.TableTargeter = (*Backend)(nil)
 
 // Connect opens the sqlite file and pings it before returning. The file
 // must already exist.
@@ -70,10 +71,16 @@ func (b *Backend) Tables(string) ([]string, error) {
 	return b.db.ListTables()
 }
 
+// TableTarget spells the table as "tbl" (double-quoted, escaped); SQLite
+// has no namespaces, so the namespace argument is ignored.
+func (b *Backend) TableTarget(_ string, table string) string {
+	return db.QuoteIdentDouble(table)
+}
+
 // FetchTable loads up to limit rows of a table; the namespace argument is
 // ignored.
 func (b *Backend) FetchTable(_ string, table string, limit int) (*data.Frame, error) {
-	query := fmt.Sprintf("select * from %s limit %d", db.QuoteIdentDouble(table), limit)
+	query := fmt.Sprintf("select * from %s limit %d", b.TableTarget("", table), limit)
 	fields, records, err := b.db.RawQuery(query)
 	if err != nil {
 		return nil, err

@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
-	"sync"
 	"time"
 
 	_ "github.com/sijms/go-ora/v2"
@@ -31,11 +30,6 @@ const (
 
 	// RetryDelay is the delay between retry attempts
 	RetryDelay = 1 * time.Second
-)
-
-var (
-	DbClient *DB
-	clientMu sync.RWMutex
 )
 
 type DB struct {
@@ -80,18 +74,11 @@ func NewDB(dsn string, dbName string) (*DB, error) {
 		return nil, fmt.Errorf("failed to connect after %d attempts: %w", MaxRetries+1, err)
 	}
 
-	clientMu.Lock()
-	defer clientMu.Unlock()
-	if DbClient != nil {
-		DbClient.DB.Close()
-	}
-
-	DbClient = &DB{
+	return &DB{
 		DB:     dbc,
 		dsn:    dsn,
 		dbName: dbName,
-	}
-	return DbClient, nil
+	}, nil
 }
 
 type RawCommandResult struct {

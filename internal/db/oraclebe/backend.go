@@ -53,6 +53,7 @@ type Backend struct {
 }
 
 var _ db.Backend = (*Backend)(nil)
+var _ db.TableTargeter = (*Backend)(nil)
 
 // Connect opens an Oracle connection, validates the config, pings the
 // server, and returns a ready-to-use Backend.
@@ -141,6 +142,16 @@ func (b *Backend) Tables(namespace string) ([]string, error) {
 	return b.db.ShowSchemaTables(namespace)
 }
 
+// TableTarget spells namespace.table as "ns"."tbl" (empty namespace drops
+// the owner qualifier), the same spelling FetchTable uses.
+func (b *Backend) TableTarget(namespace, table string) string {
+	ident := db.QuoteIdentDouble(table)
+	if namespace != "" {
+		ident = db.QuoteIdentDouble(namespace) + "." + ident
+	}
+	return ident
+}
+
 // FetchTable loads up to limit rows of namespace.table, preserving native
 // Go types for accurate display.
 func (b *Backend) FetchTable(namespace, table string, limit int) (*data.Frame, error) {
@@ -149,11 +160,7 @@ func (b *Backend) FetchTable(namespace, table string, limit int) (*data.Frame, e
 	} else if limit > 10000 {
 		limit = 10000
 	}
-	ident := db.QuoteIdentDouble(table)
-	if namespace != "" {
-		ident = db.QuoteIdentDouble(namespace) + "." + ident
-	}
-	query := fmt.Sprintf("SELECT * FROM %s WHERE ROWNUM <= %d", ident, limit)
+	query := fmt.Sprintf("SELECT * FROM %s WHERE ROWNUM <= %d", b.TableTarget(namespace, table), limit)
 	return b.queryFrame(query)
 }
 

@@ -38,10 +38,10 @@ const tabFilterThreshold = 8
 // app. With many tabs a fuzzy filter line narrows the list as you type.
 type tabSwitcher struct {
 	tabs     []ui.TabInfo
-	filtered []int    // positions into tabs shown by the list (filter applied)
-	matchPos [][]int  // fuzzy match rune positions per filtered entry (parallel to filtered)
-	query    []rune   // filter text (only used above the threshold)
-	cursor   int      // index into filtered
+	filtered []int   // positions into tabs shown by the list (filter applied)
+	matchPos [][]int // fuzzy match rune positions per filtered entry (parallel to filtered)
+	query    []rune  // filter text (only used above the threshold)
+	cursor   int     // index into filtered
 
 	offset   int // first visible list row
 	viewRows int // list rows shown by the last View (page size)

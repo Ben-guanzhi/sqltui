@@ -36,7 +36,7 @@ func (cw csvWriter) Write(w io.Writer, f *data.Frame, opt Options) error {
 	record := make([]string, f.NumCols())
 	for r := 0; r < f.NumRows(); r++ {
 		for c := range f.Columns {
-			record[c] = data.FormatValue(f.Columns[c].Cells[r])
+			record[c] = data.FormatValue(f.Cell(r, c))
 		}
 		if err := enc.Write(record); err != nil {
 			return err

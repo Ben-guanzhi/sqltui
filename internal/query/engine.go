@@ -103,7 +103,7 @@ func (e *Engine) Register(name string, f *data.Frame) error {
 	args := make([]any, f.NumCols())
 	for row := 0; row < f.NumRows(); row++ {
 		for col := range f.Columns {
-			args[col] = bindValue(f.Columns[col].Cells[row], f.Columns[col].Type)
+			args[col] = bindValue(f.Cell(row, col), f.Columns[col].Type)
 		}
 		if _, err := stmt.Exec(args...); err != nil {
 			return fmt.Errorf("register %q: insert row %d: %w", name, row, err)
@@ -243,8 +243,9 @@ func (e *Engine) Query(q string) (*data.Frame, error) {
 			if n, ok := v.(int64); ok && f.Columns[i].Type == data.TypeBool {
 				v = n != 0
 			}
-			f.Columns[i].Cells = append(f.Columns[i].Cells, v)
+			vals[i] = v
 		}
+		f.AppendRow(vals)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

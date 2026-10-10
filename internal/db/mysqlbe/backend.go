@@ -39,6 +39,7 @@ type Backend struct {
 }
 
 var _ db.Backend = (*Backend)(nil)
+var _ db.TableTargeter = (*Backend)(nil)
 
 // Connect opens a mysql connection and pings it before returning.
 func Connect(cfg Config) (*Backend, error) {
@@ -100,13 +101,18 @@ func (b *Backend) Tables(namespace string) ([]string, error) {
 	return b.db.ShowDatabaseTables(namespace)
 }
 
-// FetchTable loads up to limit rows of namespace.table.
-func (b *Backend) FetchTable(namespace, table string, limit int) (*data.Frame, error) {
+// TableTarget spells namespace.table as `ns`.`tbl` (each part escaped).
+func (b *Backend) TableTarget(namespace, table string) string {
 	ident := db.QuoteIdentBacktick(table)
 	if namespace != "" {
 		ident = db.QuoteIdentBacktick(namespace) + "." + ident
 	}
-	query := fmt.Sprintf("select * from %s limit %d", ident, limit)
+	return ident
+}
+
+// FetchTable loads up to limit rows of namespace.table.
+func (b *Backend) FetchTable(namespace, table string, limit int) (*data.Frame, error) {
+	query := fmt.Sprintf("select * from %s limit %d", b.TableTarget(namespace, table), limit)
 	fields, records, err := b.db.RawQuery(query)
 	if err != nil {
 		return nil, err

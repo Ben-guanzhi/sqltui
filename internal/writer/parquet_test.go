@@ -70,8 +70,8 @@ func TestParquetRoundtrip(t *testing.T) {
 				if got.Columns[i].Type != col.Type {
 					t.Errorf("column %q type = %v, want %v", col.Name, got.Columns[i].Type, col.Type)
 				}
-				if !reflect.DeepEqual(got.Columns[i].Cells, col.Cells) {
-					t.Errorf("column %q cells = %#v, want %#v", col.Name, got.Columns[i].Cells, col.Cells)
+				if !reflect.DeepEqual(got.Columns[i].Values(), col.Values()) {
+					t.Errorf("column %q cells = %#v, want %#v", col.Name, got.Columns[i].Values(), col.Values())
 				}
 			}
 		})
@@ -99,9 +99,9 @@ func TestParquetUnsupportedCompression(t *testing.T) {
 // are made unique in the output schema instead of colliding.
 func TestParquetDuplicateColumnNames(t *testing.T) {
 	frame := &data.Frame{Columns: []data.Column{
-		{Name: "", Type: data.TypeInt, Cells: []any{int64(1)}},
-		{Name: "x", Type: data.TypeInt, Cells: []any{int64(2)}},
-		{Name: "x", Type: data.TypeInt, Cells: []any{int64(3)}},
+		data.NewColumn("", data.TypeInt, []any{int64(1)}),
+		data.NewColumn("x", data.TypeInt, []any{int64(2)}),
+		data.NewColumn("x", data.TypeInt, []any{int64(3)}),
 	}}
 	path := filepath.Join(t.TempDir(), "dup.parquet")
 	fh, err := os.Create(path)
@@ -129,8 +129,8 @@ func TestParquetDuplicateColumnNames(t *testing.T) {
 		t.Errorf("column names = %v, want %v", got.ColumnNames(), want)
 	}
 	for i, cell := range []any{int64(1), int64(2), int64(3)} {
-		if !reflect.DeepEqual(got.Columns[i].Cells, []any{cell}) {
-			t.Errorf("column %d cells = %#v, want [%#v]", i, got.Columns[i].Cells, cell)
+		if !reflect.DeepEqual(got.Columns[i].Values(), []any{cell}) {
+			t.Errorf("column %d cells = %#v, want [%#v]", i, got.Columns[i].Values(), cell)
 		}
 	}
 }

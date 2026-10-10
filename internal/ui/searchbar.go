@@ -21,6 +21,9 @@ type SearchBar struct {
 	base       *data.Frame // frame being searched (top of stack at activation)
 	preview    *data.Frame // live filtered result
 	searchCols []int       // when non-nil, search only these column indices
+
+	// fold 缓存 base 每格的小写形，跨按键复用；随会话起止生灭。
+	fold data.FoldCache
 }
 
 func (s *SearchBar) Active() bool  { return s.active }
@@ -41,6 +44,7 @@ func (s *SearchBar) StartCols(f *data.Frame, fuzzy bool, cols []int) {
 	s.base = f
 	s.preview = f
 	s.searchCols = cols
+	s.fold = data.FoldCache{}
 }
 
 // Type appends printable input and recomputes the preview.
@@ -98,7 +102,7 @@ func (s *SearchBar) recompute() {
 	}
 	var rows []int
 	if len(s.searchCols) > 0 {
-		rows = data.SearchExactCols(s.base, s.searchCols, s.query)
+		rows = data.SearchExactColsFold(s.base, s.searchCols, s.query, &s.fold)
 	} else if s.fuzzy {
 		rows = data.SearchFuzzy(s.base, s.query)
 	} else {
@@ -136,6 +140,7 @@ func (s *SearchBar) Cancel() {
 	s.query = ""
 	s.base = nil
 	s.preview = nil
+	s.fold = data.FoldCache{}
 }
 
 // View renders the input line shown at the bottom of the screen.

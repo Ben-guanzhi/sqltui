@@ -40,14 +40,49 @@ func (t DType) String() string {
 
 // Cell values are one of: nil (null), string, int64, float64, bool, time.Time.
 // Readers must normalize to exactly these representations.
+//
+// The cell slice is unexported: a published frame's cell values cannot be
+// changed or appended to from outside this package. That is the structural
+// half of the immutability contract (the other half is AppendRow's build-time
+// rule below); caches that key on frame identity (data.FoldCache, the UI
+// width cache) may trust that a frame's cells never change in place.
 type Column struct {
 	Name  string
 	Type  DType
-	Cells []any
+	cells []any
 }
 
-// Frame is an immutable-by-convention table. Operations that transform a
-// frame (filter, sort, query, cast) produce a new Frame.
+// NewColumn builds a column from name, type and cell values. cells is taken
+// by ownership (no copy): the caller must not mutate it afterwards. nil
+// means an empty column.
+func NewColumn(name string, t DType, cells []any) Column {
+	return Column{Name: name, Type: t, cells: cells}
+}
+
+// Len returns the number of cells (rows) in the column.
+func (c Column) Len() int {
+	return len(c.cells)
+}
+
+// Cell returns the raw value at row i; nil means null.
+func (c Column) Cell(i int) any {
+	return c.cells[i]
+}
+
+// Values returns a copy of all cell values. The copy keeps the immutability
+// contract: mutating the result cannot affect the column.
+func (c Column) Values() []any {
+	return append([]any(nil), c.cells...)
+}
+
+// Frame is an immutable table once published. Operations that transform a
+// frame (filter, sort, query, cast) produce a new Frame. The contract is
+// enforced structurally: cell storage lives behind Column's unexported
+// field, so only this package can write it. The one exported mutator,
+// AppendRow, is a build-time tool: readers call it while assembling a
+// frame, never on a frame already visible to the UI (caches key on
+// NumRows, so even a stray append would be detected, but the rule keeps
+// "published frames don't change" true by construction).
 type Frame struct {
 	Columns []Column
 }
@@ -69,7 +104,7 @@ func (f *Frame) NumRows() int {
 	if len(f.Columns) == 0 {
 		return 0
 	}
-	return len(f.Columns[0].Cells)
+	return len(f.Columns[0].cells)
 }
 
 func (f *Frame) ColumnNames() []string {
@@ -92,27 +127,38 @@ func (f *Frame) ColumnIndex(name string) int {
 
 // Cell returns the raw value at (row, col); nil means null.
 func (f *Frame) Cell(row, col int) any {
-	return f.Columns[col].Cells[row]
+	return f.Columns[col].cells[row]
 }
 
 // CellString renders the value at (row, col) for display.
 func (f *Frame) CellString(row, col int) string {
-	return FormatValue(f.Columns[col].Cells[row])
+	return FormatValue(f.Columns[col].cells[row])
 }
 
 // Row returns the raw values of one row.
 func (f *Frame) Row(row int) []any {
 	vals := make([]any, len(f.Columns))
 	for i := range f.Columns {
-		vals[i] = f.Columns[i].Cells[row]
+		vals[i] = f.Columns[i].cells[row]
 	}
 	return vals
 }
 
-// AppendRow appends one row; vals must have NumCols entries.
+// AppendRow appends one row; vals must have NumCols entries. Build-time
+// only: do not call on a frame already visible to the UI.
 func (f *Frame) AppendRow(vals []any) {
 	for i := range f.Columns {
-		f.Columns[i].Cells = append(f.Columns[i].Cells, vals[i])
+		f.Columns[i].cells = append(f.Columns[i].cells, vals[i])
+	}
+}
+
+// PreallocRows reserves capacity for n more rows so subsequent AppendRow
+// calls don't reallocate. Build-time only.
+func (f *Frame) PreallocRows(n int) {
+	for i := range f.Columns {
+		c := make([]any, 0, n+len(f.Columns[i].cells))
+		c = append(c, f.Columns[i].cells...)
+		f.Columns[i].cells = c
 	}
 }
 
@@ -122,9 +168,9 @@ func (f *Frame) Select(rows []int) *Frame {
 	for i, c := range f.Columns {
 		cells := make([]any, len(rows))
 		for j, r := range rows {
-			cells[j] = c.Cells[r]
+			cells[j] = c.cells[r]
 		}
-		out.Columns[i] = Column{Name: c.Name, Type: c.Type, Cells: cells}
+		out.Columns[i] = Column{Name: c.Name, Type: c.Type, cells: cells}
 	}
 	return out
 }
@@ -134,12 +180,12 @@ func (f *Frame) Select(rows []int) *Frame {
 func (f *Frame) WithCell(row, col int, val any) *Frame {
 	out := &Frame{Columns: make([]Column, len(f.Columns))}
 	for i, c := range f.Columns {
-		cells := make([]any, len(c.Cells))
-		copy(cells, c.Cells)
+		cells := make([]any, len(c.cells))
+		copy(cells, c.cells)
 		if i == col {
 			cells[row] = val
 		}
-		out.Columns[i] = Column{Name: c.Name, Type: c.Type, Cells: cells}
+		out.Columns[i] = Column{Name: c.Name, Type: c.Type, cells: cells}
 	}
 	return out
 }
@@ -160,13 +206,13 @@ func (f *Frame) WithoutRows(rows []int) *Frame {
 	}
 	out := &Frame{Columns: make([]Column, len(f.Columns))}
 	for i, c := range f.Columns {
-		cells := make([]any, 0, len(c.Cells)-len(drop))
-		for r, v := range c.Cells {
+		cells := make([]any, 0, len(c.cells)-len(drop))
+		for r, v := range c.cells {
 			if !drop[r] {
 				cells = append(cells, v)
 			}
 		}
-		out.Columns[i] = Column{Name: c.Name, Type: c.Type, Cells: cells}
+		out.Columns[i] = Column{Name: c.Name, Type: c.Type, cells: cells}
 	}
 	return out
 }

@@ -2,6 +2,8 @@ package oobe
 
 import (
 	"fmt"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -176,6 +178,10 @@ func buildFrame(metas []db.ColumnMeta, hits []map[string]any) *data.Frame {
 		for k := range hits[0] {
 			keys = append(keys, k)
 		}
+		// Go's map iteration order is deliberately random per pass; without
+		// this sort every page refresh would shuffle the column order under
+		// the user's cursor.
+		sort.Strings(keys)
 		f := data.New(keys...)
 		for _, hit := range hits {
 			row := make([]any, len(keys))
@@ -226,9 +232,13 @@ func cellValue(v any, t data.DType) any {
 		case int64:
 			return x
 		case string:
-			var i int64
-			fmt.Sscanf(x, "%d", &i)
-			return i
+			// Text that will not parse is missing data, not zero: the old
+			// unchecked Sscanf left 0 behind, which is indistinguishable
+			// from a row that really held one.
+			if i, err := strconv.ParseInt(strings.TrimSpace(x), 10, 64); err == nil {
+				return i
+			}
+			return nil
 		}
 	case data.TypeFloat:
 		switch x := v.(type) {
@@ -237,9 +247,10 @@ func cellValue(v any, t data.DType) any {
 		case int64:
 			return float64(x)
 		case string:
-			var f float64
-			fmt.Sscanf(x, "%f", &f)
-			return f
+			if f, err := strconv.ParseFloat(strings.TrimSpace(x), 64); err == nil {
+				return f
+			}
+			return nil
 		}
 	}
 	// TypeString or unknown — stringify
@@ -262,6 +273,15 @@ func (b *Backend) sseSearch(namespace, sql string, limit int, startUS, endUS int
 	return readSSEHits(rc)
 }
 
+var _ db.TableTargeter = (*Backend)(nil)
+
+// TableTarget spells the stream as "stream" (double-quoted, unescaped, as
+// the search SQL has always spelled it); the namespace (org/project) lives
+// in the request URL, not in the statement, so it is ignored.
+func (b *Backend) TableTarget(_ string, table string) string {
+	return `"` + table + `"`
+}
+
 // FetchTable loads up to limit rows of namespace.table, newest first.
 func (b *Backend) FetchTable(namespace, table string, limit int) (*data.Frame, error) {
 	metas, err := b.ColumnsMeta(namespace, table)
@@ -276,7 +296,7 @@ func (b *Backend) FetchTable(namespace, table string, limit int) (*data.Frame, e
 
 	offset := b.page * b.pageSize
 
-	sql := fmt.Sprintf(`SELECT * FROM "%s" ORDER BY _timestamp DESC`, table)
+	sql := "SELECT * FROM " + b.TableTarget(namespace, table) + " ORDER BY _timestamp DESC"
 	body := buildSearchBodyWithOffset(sql, b.pageSize, offset, startUS, endUS)
 	rc, err := b.client.postSSE(
 		fmt.Sprintf("/api/%s/_search_stream?type=logs&search_type=ui&use_cache=true", namespace),
@@ -293,12 +313,15 @@ func (b *Backend) FetchTable(namespace, table string, limit int) (*data.Frame, e
 }
 
 // Run executes a SQL statement. For OpenObserve all statements are read-only
-// queries sent over the SSE search endpoint against the last 15 minutes.
+// queries sent over the SSE search endpoint. The window is the same one the
+// table view reads: a query and the pane above it must not disagree about
+// which minutes of data exist.
 func (b *Backend) Run(stmt string) (db.Result, error) {
-	endUS := nowMicros()
-	startUS := endUS - int64(15*time.Minute/time.Microsecond)
+	if b.startUS == 0 {
+		b.ResetTimeWindow()
+	}
 
-	hits, err := b.sseSearch(b.cfg.Org, stmt, 1000, startUS, endUS)
+	hits, err := b.sseSearch(b.cfg.Org, stmt, 1000, b.startUS, b.endUS)
 	if err != nil {
 		return db.Result{}, err
 	}

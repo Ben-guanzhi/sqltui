@@ -11,10 +11,10 @@ import (
 
 func histTestFrame() *data.Frame {
 	return &data.Frame{Columns: []data.Column{
-		{Name: "name", Type: data.TypeString, Cells: []any{"a", "b", "c"}},
-		{Name: "n", Type: data.TypeInt, Cells: []any{int64(1), int64(2), nil}},
-		{Name: "mixed", Type: data.TypeString, Cells: []any{"1.5", "x", " 2 "}},
-		{Name: "flag", Type: data.TypeBool, Cells: []any{true, false, true}},
+		data.NewColumn("name", data.TypeString, []any{"a", "b", "c"}),
+		data.NewColumn("n", data.TypeInt, []any{int64(1), int64(2), nil}),
+		data.NewColumn("mixed", data.TypeString, []any{"1.5", "x", " 2 "}),
+		data.NewColumn("flag", data.TypeBool, []any{true, false, true}),
 	}}
 }
 

@@ -21,8 +21,8 @@ type AppContext interface {
 	CurrentRow() int           // selected row in current table view
 	SheetFieldCursor() int     // selected field in sheet mode
 	CurrentTableNamespace() string
-	BaseCrumb() string         // current tab title
-	Crumbs() []string          // full breadcrumb chain
+	BaseCrumb() string // current tab title
+	Crumbs() []string  // full breadcrumb chain
 	ColumnNames() []string
 	Engine() *query.Engine // embedded SQL engine (may be nil in db mode)
 	TableNames() []string  // engine-registered + backend tables for completion

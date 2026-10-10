@@ -28,6 +28,12 @@ type Pane struct {
 	id    int
 	stack []entry
 
+	// sourceNS/sourceTable record the live table the base frame was fetched
+	// from (set only by the table-open path). They let the inline prompts
+	// name the real table instead of guessing from the tab title.
+	sourceNS    string
+	sourceTable string
+
 	Table      TableView
 	Mode       ViewMode
 	SheetOff   int // left-list scroll offset (key column)
@@ -58,7 +64,6 @@ type Pane struct {
 	// HScroll is the character-level horizontal offset applied to the last
 	// TableCols column so the user can pan within wide content (e.g. body).
 	HScroll int
-
 }
 
 // paneIDCounter hands out stable unique pane IDs (see Pane.ID).

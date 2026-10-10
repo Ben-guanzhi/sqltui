@@ -20,28 +20,28 @@ var update = flag.Bool("update", false, "rewrite golden files")
 // characters that need escaping.
 func sampleFrame() *data.Frame {
 	return &data.Frame{Columns: []data.Column{
-		{Name: "s", Type: data.TypeString, Cells: []any{
+		data.NewColumn("s", data.TypeString, []any{
 			"hello", `pipe|and,comma "q"`, nil,
-		}},
-		{Name: "i", Type: data.TypeInt, Cells: []any{
+		}),
+		data.NewColumn("i", data.TypeInt, []any{
 			int64(1), int64(-42), nil,
-		}},
-		{Name: "f", Type: data.TypeFloat, Cells: []any{
+		}),
+		data.NewColumn("f", data.TypeFloat, []any{
 			float64(1.5), float64(-0.25), nil,
-		}},
-		{Name: "b", Type: data.TypeBool, Cells: []any{
+		}),
+		data.NewColumn("b", data.TypeBool, []any{
 			true, false, nil,
-		}},
-		{Name: "d", Type: data.TypeDate, Cells: []any{
+		}),
+		data.NewColumn("d", data.TypeDate, []any{
 			time.Date(2024, 1, 2, 0, 0, 0, 0, time.UTC),
 			time.Date(1969, 12, 31, 0, 0, 0, 0, time.UTC),
 			nil,
-		}},
-		{Name: "ts", Type: data.TypeDatetime, Cells: []any{
+		}),
+		data.NewColumn("ts", data.TypeDatetime, []any{
 			time.Date(2024, 1, 2, 3, 4, 5, 0, time.UTC),
 			time.Date(2023, 6, 30, 23, 59, 59, 0, time.UTC),
 			nil,
-		}},
+		}),
 	}}
 }
 
@@ -118,8 +118,8 @@ func TestUnknownFormat(t *testing.T) {
 
 func TestJSONDuplicateColumnNames(t *testing.T) {
 	f := &data.Frame{Columns: []data.Column{
-		{Name: "a", Type: data.TypeInt, Cells: []any{int64(1)}},
-		{Name: "a", Type: data.TypeInt, Cells: []any{int64(2)}},
+		data.NewColumn("a", data.TypeInt, []any{int64(1)}),
+		data.NewColumn("a", data.TypeInt, []any{int64(2)}),
 	}}
 	for _, format := range []writer.Format{writer.FormatJSON, writer.FormatJSONL} {
 		w, err := writer.For(format)
@@ -139,8 +139,8 @@ func TestJSONDuplicateColumnNames(t *testing.T) {
 
 func TestMarkdownBackslashPipeRoundtrip(t *testing.T) {
 	f := &data.Frame{Columns: []data.Column{
-		{Name: "s", Type: data.TypeString, Cells: []any{`a\|b`, `a\b`}},
-		{Name: "z", Type: data.TypeString, Cells: []any{"z1", "z2"}},
+		data.NewColumn("s", data.TypeString, []any{`a\|b`, `a\b`}),
+		data.NewColumn("z", data.TypeString, []any{"z1", "z2"}),
 	}}
 	w, err := writer.For(writer.FormatMarkdown)
 	if err != nil {
@@ -178,8 +178,8 @@ func TestMarkdownBackslashPipeRoundtrip(t *testing.T) {
 	}
 	for i, want := range wantRows {
 		for c := range want {
-			if got.Columns[c].Cells[i] != want[c] {
-				t.Errorf("row %d col %d = %#v, want %#v", i, c, got.Columns[c].Cells[i], want[c])
+			if got.Cell(i, c) != want[c] {
+				t.Errorf("row %d col %d = %#v, want %#v", i, c, got.Cell(i, c), want[c])
 			}
 		}
 	}
