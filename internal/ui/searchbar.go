@@ -143,7 +143,7 @@ func (s *SearchBar) Cancel() {
 	s.fold = data.FoldCache{}
 }
 
-// View renders the input line shown at the bottom of the screen.
+// View renders the input line shown at the top of the screen while searching.
 func (s *SearchBar) View(width int, th *theme.Theme) string {
 	rowInfo := ""
 	if s.base != nil {
@@ -153,16 +153,24 @@ func (s *SearchBar) View(width int, th *theme.Theme) string {
 		}
 		rowInfo = th.Subtle.Render(strconv.Itoa(n) + " rows ")
 	}
-	filterPart := FilterLine(s.query, s.active, width-ansi.StringWidth(rowInfo), "type to search", th)
-	// Overlay the row count on the right edge of the filter line.
-	if rowInfo != "" && ansi.StringWidth(filterPart)+ansi.StringWidth(rowInfo) <= width {
-		// Trim trailing spaces from filterPart, then append rowInfo right-aligned.
-		trimmed := strings.TrimRight(filterPart, " ")
-		pad := width - ansi.StringWidth(trimmed) - ansi.StringWidth(rowInfo)
-		if pad < 1 {
-			pad = 1
+	rowW := ansi.StringWidth(rowInfo)
+	room := width - rowW
+	if room < 0 {
+		room = 0
+	}
+	// 过滤行只占扣掉行数后的余量：整行要恰好等于 width，不能多也不能少。
+	// 旧的写法先补白到 width-rowW 再额外塞一格 pad，且 strings.TrimRight 对
+	// 带样式的补白是空操作（行尾是 SGR 复位序列而非空格），pad 恒被夹到 1，
+	// 整行永远宽一格，终端硬回绕。
+	filterPart := FilterLine(s.query, s.active, room, "type to search", th)
+	if rowInfo != "" {
+		// 查询过长被截断（含双宽字符回退）时过滤行会短于 room，中间的差额
+		// 补成空格把行数推到行尾。
+		gap := width - ansi.StringWidth(filterPart) - rowW
+		if gap < 0 {
+			gap = 0
 		}
-		filterPart = trimmed + strings.Repeat(" ", pad) + rowInfo
+		filterPart += th.Text.Render(strings.Repeat(" ", gap)) + rowInfo
 	}
 	return filterPart
 }

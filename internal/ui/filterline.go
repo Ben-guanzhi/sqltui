@@ -23,7 +23,13 @@ func FilterLine(filter string, filtering bool, width int, hint string, th *theme
 		body = th.Input.Render(filter)
 	}
 	line := prefix + body
-	if w := ansi.StringWidth(line); w < width {
+	w := ansi.StringWidth(line)
+	if w > width {
+		// 过滤文本比可用宽度还长：截断。不截断的话整行越界、终端硬回绕，
+		// 所有调用方（搜索条、sheet 过滤、redis 过滤、schema/标签切换弹窗）都会中招。
+		return ansi.Truncate(line, width, "")
+	}
+	if w < width {
 		line += th.Text.Render(strings.Repeat(" ", width-w))
 	}
 	return line

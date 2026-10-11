@@ -2,9 +2,11 @@ package ui
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/LinPr/sqltui/internal/data"
 	"github.com/LinPr/sqltui/internal/theme"
@@ -277,4 +279,37 @@ func TestSearchFoldCacheLifecycle(t *testing.T) {
 		t.Fatal("未限定列时不该建列缓存")
 	}
 	s.Cancel()
+}
+
+// TestSearchBarViewWidthNeverOverflows 钉住搜索条的宽度不变量：整行必须恰好等于
+// 视口宽，多一格终端就会把最后一个字符硬回绕到下一行。
+//
+// 金样测试第一次生成时就抓到了这个 bug：过滤行补白到 width-行数宽之后，又额外
+// 塞了一格 pad 再拼行数——而 strings.TrimRight 对带样式的补白是空操作（行尾是
+// SGR 复位序列，不是空格），所以 pad 恒被夹到 1，整行永远是 width+1。
+func TestSearchBarViewWidthNeverOverflows(t *testing.T) {
+	f := searchFrame()
+	th := theme.Default()
+	// 覆盖：空查询（占位符）、短查询、CJK 查询、以及远长于可用宽度的查询。
+	queries := []string{"", "a", "ali", "客户", "zzz", strings.Repeat("客户", 30)}
+	for _, width := range []int{16, 40, 80, 160} {
+		for _, q := range queries {
+			var s SearchBar
+			s.Start(f, false)
+			s.Type(q)
+			out := s.View(width, th)
+			if w := ansi.StringWidth(out); w != width {
+				t.Errorf("width=%d query=%q: 搜索条宽 = %d，想要 %d（%q）", width, q, w, width, ansi.Strip(out))
+			}
+		}
+	}
+
+	// 未激活时没有行数段，行宽同样必须恰好等于视口宽。
+	var idle SearchBar
+	for _, width := range []int{16, 80, 160} {
+		out := idle.View(width, th)
+		if w := ansi.StringWidth(out); w != width {
+			t.Errorf("未激活 width=%d: 行宽 = %d，想要 %d（%q）", width, w, width, ansi.Strip(out))
+		}
+	}
 }
