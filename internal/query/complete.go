@@ -60,22 +60,22 @@ var engineKeywords = map[string][]string{
 		"NEXT", "ROWS", "ONLY", "OPTION", "RECOMPILE", "KEEP", "FIXEDPLAN",
 		"MAXDOP", "MAXRECURSION", "FORCE", "HINT",
 	},
-	"oracle": {
-		"ROWNUM", "ROWID", "SYSDATE", "SYSTIMESTAMP", "LEVEL", "CONNECT",
-		"BY", "START", "WITH", "NOCYCLE", "CONNECT_BY_ISLEAF",
-		"CONNECT_BY_ISCYCLE", "CONNECT_BY_ROOT", "SYS_CONNECT_BY_PATH",
-		"EXTRACT", "MONTHS_BETWEEN", "ADD_MONTHS", "LAST_DAY", "NEXT_DAY",
-		"ROUND", "TRUNC", "TO_CHAR", "TO_DATE", "TO_NUMBER", "NVL", "NVL2",
-		"COALESCE", "DECODE", "CASE", "WHEN", "THEN", "ELSE", "END",
-		"MERGE", "USING", "MATCHED", "NOT", "MATCHED", "INSERT", "VALUES",
-		"UPDATE", "DELETE", "WHERE", "AND", "OR", "IN", "EXISTS", "NOT",
-		"UNION", "UNION", "ALL", "INTERSECT", "MINUS", "ORDER", "GROUP",
-		"HAVING", "DISTINCT", "UNIQUE", "ALL", "ROWNUM", "ROWID",
-		"CREATE", "ALTER", "DROP", "TRUNCATE", "RENAME", "COMMENT",
-		"GRANT", "REVOKE", "AUDIT", "NOAUDIT", "COMMIT", "ROLLBACK",
-		"SAVEPOINT", "SET", "TRANSACTION", "LOCK", "TABLE", "EXPLAIN",
-		"PLAN", "FOR", "UPDATE", "NOWAIT", "WAIT", "SKIP", "LOCKED",
-	},
+	// Oracle words come from Oracle's own dictionary: the [PLSQL] and [SQL]
+	// sections of PL/SQL Developer's default.kwf, merged into
+	// keywords_oracle_gen.go. Both sections are needed: MINUS, MERGE and
+	// CONNECT are plain SQL words that live only in [PLSQL]. This replaces
+	// the earlier hand-picked ~60 words, which also repeated MATCHED, NOT,
+	// UNION, ALL, ROWNUM and ROWID.
+	"oracle": dedupSorted(oracleSQLKeywords, oracleSQLExtra),
+}
+
+// oracleSQLExtra are Oracle words that default.kwf omits but Oracle accepts:
+// the CONNECT BY predicates and the SYS_CONNECT_BY_PATH path function. They
+// are added by hand because default.kwf is an external artifact we cannot
+// patch.
+var oracleSQLExtra = []string{
+	"CONNECT_BY_ISCYCLE", "CONNECT_BY_ISLEAF", "CONNECT_BY_ROOT",
+	"SYS_CONNECT_BY_PATH",
 }
 
 // sqlFunctions is the set of built-in functions offered by the completer
@@ -105,7 +105,7 @@ var engineFunctions = map[string][]string{
 		"DATEPART", "DAY", "DAYOFYEAR", "EOMONTH", "GETDATE", "GETUTCDATE",
 		"ISDATE", "MONTH", "SYSDATETIME", "SYSDATETIMEOFFSET", "SYSUTCDATETIME",
 		"TODATETIMEOFFSET", "YEAR", "JSON_VALUE", "JSON_QUERY", "JSON_MODIFY",
-		"ISJSON", "OPENJSON", "FOR JSON", "FOR PATH",
+		"ISJSON", "OPENJSON",
 	},
 	"oracle": {
 		"ASCII", "CHR", "CONCAT", "INITCAP", "INSTR", "INSTRB", "LENGTH",
@@ -118,7 +118,7 @@ var engineFunctions = map[string][]string{
 		"AVG", "COUNT", "GROUPING", "MAX", "MIN", "STDDEV", "STDDEV_POP",
 		"STDDEV_SAMP", "SUM", "VAR_POP", "VAR_SAMP", "VARIANCE",
 		"ADD_MONTHS", "LAST_DAY", "MONTHS_BETWEEN", "NEXT_DAY", "ROUND",
-		"SYSDATE", "TO_CHAR", "TO_DATE", "TRUNC",
+		"SYSDATE", "TO_CHAR", "TO_DATE", "TO_NUMBER", "TRUNC",
 		"CAST", "COALESCE", "DECODE", "GREATEST", "LEAST", "NVL", "NVL2",
 		"NULLIF", "REMAINDER", "LNNVL", "NULLS", "FIRST", "LAST",
 	},
@@ -137,6 +137,25 @@ var reservedWords = func() map[string]bool {
 	return m
 }()
 
+// dedupSorted concatenates parts, dropping empty entries and duplicates
+// (compared case-insensitively - a word is either in the dictionary or
+// it is not), and returns the result sorted ascending.
+func dedupSorted(parts ...[]string) []string {
+	seen := make(map[string]bool)
+	var out []string
+	for _, p := range parts {
+		for _, w := range p {
+			if w == "" || seen[strings.ToLower(w)] {
+				continue
+			}
+			seen[strings.ToLower(w)] = true
+			out = append(out, w)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
 // Keywords returns every SQL word known to the completer (keywords and
 // function names, without the "(" suffix), sorted.
 func Keywords() []string {
@@ -151,17 +170,15 @@ func Keywords() []string {
 // keywords, and function names for a given engine kind. If engine is empty,
 // only base keywords and functions are returned.
 func EngineKeywords(engine string) []string {
-	out := make([]string, 0, len(sqlKeywords)+len(sqlFunctions))
-	out = append(out, sqlKeywords...)
-	out = append(out, sqlFunctions...)
+	var parts [][]string
+	parts = append(parts, sqlKeywords, sqlFunctions)
 	if engineKw, ok := engineKeywords[engine]; ok {
-		out = append(out, engineKw...)
+		parts = append(parts, engineKw)
 	}
 	if engineFn, ok := engineFunctions[engine]; ok {
-		out = append(out, engineFn...)
+		parts = append(parts, engineFn)
 	}
-	sort.Strings(out)
-	return out
+	return dedupSorted(parts...)
 }
 
 // tableCtxWords introduce a table-name position (context a).

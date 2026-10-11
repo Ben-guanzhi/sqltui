@@ -406,3 +406,64 @@ func TestSuggestKeywordListsSorted(t *testing.T) {
 		}
 	}
 }
+
+func TestEngineKeywordsSortedAndUnique(t *testing.T) {
+	for _, eng := range []string{"", "sqlserver", "oracle", "postgres", "notanengine"} {
+		got := EngineKeywords(eng)
+		if !sort.StringsAreSorted(got) {
+			t.Errorf("%q: not sorted", eng)
+		}
+		seen := make(map[string]bool)
+		for _, w := range got {
+			if w == "" {
+				t.Errorf("%q: empty entry", eng)
+			}
+			if seen[strings.ToLower(w)] {
+				t.Errorf("%q: duplicate entry %q", eng, w)
+			}
+			seen[strings.ToLower(w)] = true
+		}
+	}
+}
+
+// A function candidate is completed as NAME(, so a multi-word entry would
+// produce an invalid suggestion such as "FOR JSON(".
+func TestEngineFunctionsAreSingleWord(t *testing.T) {
+	for eng, fns := range engineFunctions {
+		for _, f := range fns {
+			if strings.ContainsAny(f, " ") {
+				t.Errorf("%s: %q cannot be suggested as a function", eng, f)
+			}
+		}
+	}
+}
+
+func TestOracleDictionaryCoversSQLWords(t *testing.T) {
+	got := EngineKeywords("oracle")
+	for _, want := range []string{"MINUS", "MERGE", "CONNECT", "PRIOR", "ROWNUM", "ROWID", "ANYSCHEMA", "MODEL", "CONNECT_BY_ISLEAF", "CONNECT_BY_ROOT", "SYS_CONNECT_BY_PATH", "TO_NUMBER"} {
+		if i := sort.SearchStrings(got, want); i >= len(got) || got[i] != want {
+			t.Errorf("EngineKeywords(oracle) missing %q", want)
+		}
+	}
+	if n := len(got); n < 1000 {
+		t.Errorf("EngineKeywords(oracle) has %d words, want the full Oracle dictionary", n)
+	}
+}
+
+func TestSuggestOracleKeywords(t *testing.T) {
+	sc := Schema{Engine: "oracle"}
+	for _, word := range []string{"minus", "merge", "connect"} {
+		in := "select " + word
+		got := texts(Suggest(in, len(in), sc))
+		found := false
+		for _, g := range got {
+			if g == word {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("Suggest(%q) missing %q: %v", in, word, got)
+		}
+	}
+}
