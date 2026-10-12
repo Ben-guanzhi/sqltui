@@ -2,9 +2,11 @@ package sqlitebe
 
 import (
 	"database/sql"
+	"context"
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	_ "modernc.org/sqlite"
 
@@ -23,6 +25,11 @@ const (
 
 	// max rows fetched when browsing a table from the tree view
 	FetchLimit = 200
+
+	// A locked or huge file would otherwise hang the UI with no way out.
+	// Same values the oracle and sqlserver backends use.
+	QueryTimeout   = 30 * time.Second
+	ConnectTimeout = 10 * time.Second
 )
 
 var (
@@ -54,7 +61,9 @@ func NewDB(file string) (*DB, error) {
 		return nil, err
 	}
 
-	if err := dbc.Ping(); err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), ConnectTimeout)
+	defer cancel()
+	if err := dbc.PingContext(ctx); err != nil {
 		dbc.Close()
 		return nil, err
 	}
@@ -90,7 +99,7 @@ func (db *DB) RawSqlCommand(query string) (rawCmdResult RawCommandResult, err er
 	default:
 		// INSERT/UPDATE/DELETE ... RETURNING (SQLite >= 3.35) also produces
 		// a result set that db.Exec would silently discard.
-		rawCmdResult.IsDQL = dbapi.HasReturningClause(words)
+		rawCmdResult.IsDQL = dbapi.HasReturningClause(query)
 	}
 
 	if rawCmdResult.IsDQL {
@@ -102,7 +111,10 @@ func (db *DB) RawSqlCommand(query string) (rawCmdResult RawCommandResult, err er
 }
 
 func (db *DB) RawQuery(query string) (fields []string, records [][]string, err error) {
-	rows, err := db.Query(query)
+	ctx, cancel := context.WithTimeout(context.Background(), QueryTimeout)
+	defer cancel()
+
+	rows, err := db.QueryContext(ctx, query)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -122,7 +134,10 @@ func (db *DB) RawQuery(query string) (fields []string, records [][]string, err e
 }
 
 func (db *DB) RawExec(query string) (sql.Result, error) {
-	res, err := db.Exec(query)
+	ctx, cancel := context.WithTimeout(context.Background(), QueryTimeout)
+	defer cancel()
+
+	res, err := db.ExecContext(ctx, query)
 	if err != nil {
 		return nil, err
 	}
@@ -131,8 +146,11 @@ func (db *DB) RawExec(query string) (sql.Result, error) {
 
 // ListTables lists all user tables of the sqlite database file.
 func (db *DB) ListTables() ([]string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), QueryTimeout)
+	defer cancel()
+
 	query := "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
-	rows, err := db.Query(query)
+	rows, err := db.QueryContext(ctx, query)
 	if err != nil {
 		return nil, err
 	}
@@ -151,8 +169,11 @@ func (db *DB) ListTables() ([]string, error) {
 
 // FetchTableFields returns the column names of a table via PRAGMA table_info.
 func (db *DB) FetchTableFields(table string) ([]string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), QueryTimeout)
+	defer cancel()
+
 	query := fmt.Sprintf("PRAGMA table_info(%s)", dbapi.QuoteIdentDouble(table))
-	rows, err := db.Query(query)
+	rows, err := db.QueryContext(ctx, query)
 	if err != nil {
 		return nil, err
 	}
@@ -174,8 +195,11 @@ func (db *DB) FetchTableFields(table string) ([]string, error) {
 }
 
 func (db *DB) FetchTableRecords(table string) ([][]string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), QueryTimeout)
+	defer cancel()
+
 	query := fmt.Sprintf("select * from %s limit %d", dbapi.QuoteIdentDouble(table), FetchLimit)
-	rows, err := db.Query(query)
+	rows, err := db.QueryContext(ctx, query)
 	if err != nil {
 		return nil, err
 	}

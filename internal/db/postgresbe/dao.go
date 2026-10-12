@@ -87,7 +87,7 @@ func (db *DB) RawSqlCommand(query string) (rawCmdResult RawCommandResult, err er
 	case SELECT, WITH, SHOW, EXPLAIN, VALUES, TABLE:
 		rawCmdResult.IsDQL = true
 	default:
-		rawCmdResult.IsDQL = dbapi.HasReturningClause(words)
+		rawCmdResult.IsDQL = dbapi.HasReturningClause(query)
 	}
 
 	if rawCmdResult.IsDQL {

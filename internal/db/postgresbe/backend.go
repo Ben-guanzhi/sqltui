@@ -66,7 +66,7 @@ func (b *Backend) Run(stmt string) (db.Result, error) {
 	case SELECT, WITH, SHOW, EXPLAIN, VALUES, TABLE:
 		isDQL = true
 	default:
-		isDQL = db.HasReturningClause(words)
+		isDQL = db.HasReturningClause(stmt)
 	}
 
 	if isDQL {

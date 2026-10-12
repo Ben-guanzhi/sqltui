@@ -2,8 +2,10 @@ package mysqlbe
 
 import (
 	"database/sql"
+	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	_ "github.com/go-sql-driver/mysql"
 
@@ -25,6 +27,11 @@ const (
 
 	// max rows fetched when browsing a table from the tree view
 	FetchLimit = 200
+
+	// Unbounded statements hang the UI forever on a wedged server or network.
+	// Same values the oracle and sqlserver backends use.
+	QueryTimeout   = 30 * time.Second
+	ConnectTimeout = 10 * time.Second
 )
 
 type DB struct {
@@ -39,7 +46,9 @@ func NewDB(dsn string, dbName string) (*DB, error) {
 		return nil, err
 	}
 
-	if err := dbc.Ping(); err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), ConnectTimeout)
+	defer cancel()
+	if err := dbc.PingContext(ctx); err != nil {
 		dbc.Close()
 		return nil, err
 	}
@@ -76,7 +85,7 @@ func (db *DB) RawSqlCommand(query string) (rawCmdResult RawCommandResult, err er
 		default:
 			// INSERT/UPDATE/DELETE ... RETURNING (MariaDB) also produces a
 			// result set that db.Exec would silently discard.
-			rawCmdResult.IsDQL = dbapi.HasReturningClause(cmd)
+			rawCmdResult.IsDQL = dbapi.HasReturningClause(query)
 		}
 	}
 
@@ -89,7 +98,10 @@ func (db *DB) RawSqlCommand(query string) (rawCmdResult RawCommandResult, err er
 }
 
 func (db *DB) RawQuery(query string) (fields []string, records [][]string, err error) {
-	rows, err := db.Query(query)
+	ctx, cancel := context.WithTimeout(context.Background(), QueryTimeout)
+	defer cancel()
+
+	rows, err := db.QueryContext(ctx, query)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -110,7 +122,10 @@ func (db *DB) RawQuery(query string) (fields []string, records [][]string, err e
 }
 
 func (db *DB) RawExec(query string) (sql.Result, error) {
-	res, err := db.Exec(query)
+	ctx, cancel := context.WithTimeout(context.Background(), QueryTimeout)
+	defer cancel()
+
+	res, err := db.ExecContext(ctx, query)
 	if err != nil {
 		return nil, err
 	}
@@ -118,8 +133,11 @@ func (db *DB) RawExec(query string) (sql.Result, error) {
 }
 
 func (db *DB) ShowDatabases() ([]string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), QueryTimeout)
+	defer cancel()
+
 	query := "show databases"
-	rows, err := db.Query(query)
+	rows, err := db.QueryContext(ctx, query)
 	if err != nil {
 		return nil, err
 	}
@@ -138,12 +156,15 @@ func (db *DB) ShowDatabases() ([]string, error) {
 }
 
 func (db *DB) ShowDatabaseTables(database string) ([]string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), QueryTimeout)
+	defer cancel()
+
 	query := "show tables"
 	if database != "" {
 		query = "show tables from " + dbapi.QuoteIdentBacktick(database)
 	}
 
-	rows, err := db.Query(query)
+	rows, err := db.QueryContext(ctx, query)
 	if err != nil {
 		return nil, err
 	}
@@ -165,8 +186,11 @@ func (db *DB) ShowCurrentDatabaseTables() ([]string, error) {
 }
 
 func (db *DB) FetchTableFields(table string) ([]string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), QueryTimeout)
+	defer cancel()
+
 	query := fmt.Sprintf("describe %s", dbapi.QuoteIdentBacktick(table))
-	rows, err := db.Query(query)
+	rows, err := db.QueryContext(ctx, query)
 	if err != nil {
 		return nil, err
 	}
@@ -185,8 +209,11 @@ func (db *DB) FetchTableFields(table string) ([]string, error) {
 }
 
 func (db *DB) FetchTableRecords(table string) ([][]string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), QueryTimeout)
+	defer cancel()
+
 	query := fmt.Sprintf("select * from %s limit %d", dbapi.QuoteIdentBacktick(table), FetchLimit)
-	rows, err := db.Query(query)
+	rows, err := db.QueryContext(ctx, query)
 	if err != nil {
 		return nil, err
 	}
@@ -216,7 +243,9 @@ func (db *DB) PrimaryKeys(database, table string) ([]string, error) {
 	query := `SELECT column_name FROM information_schema.key_column_usage
 		WHERE table_schema = ? AND table_name = ?
 		ORDER BY ordinal_position`
-	rows, err := db.Query(query, database, table)
+	ctx, cancel := context.WithTimeout(context.Background(), QueryTimeout)
+	defer cancel()
+	rows, err := db.QueryContext(ctx, query, database, table)
 	if err != nil {
 		return nil, err
 	}
@@ -246,7 +275,9 @@ func (db *DB) ColumnsMeta(database, table string) ([]dbapi.ColumnMeta, error) {
 		FROM information_schema.columns
 		WHERE table_schema = ? AND table_name = ?
 		ORDER BY ordinal_position`
-	rows, err := db.Query(query, database, table)
+	ctx, cancel := context.WithTimeout(context.Background(), QueryTimeout)
+	defer cancel()
+	rows, err := db.QueryContext(ctx, query, database, table)
 	if err != nil {
 		return nil, err
 	}
@@ -280,7 +311,9 @@ func (db *DB) ColumnIndexTypes(database, table string) (map[string]string, error
 		FROM information_schema.statistics
 		WHERE table_schema = ? AND table_name = ?
 		ORDER BY CASE WHEN index_name = 'PRIMARY' THEN 0 WHEN non_unique = 0 THEN 1 ELSE 2 END, seq_in_index`
-	rows, err := db.Query(query, database, table)
+	ctx, cancel := context.WithTimeout(context.Background(), QueryTimeout)
+	defer cancel()
+	rows, err := db.QueryContext(ctx, query, database, table)
 	if err != nil {
 		return nil, err
 	}

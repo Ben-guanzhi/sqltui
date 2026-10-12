@@ -106,7 +106,7 @@ func (db *DB) RawSqlCommand(query string) (rawCmdResult RawCommandResult, err er
 		case strings.HasPrefix(first, "("):
 			rawCmdResult.IsDQL = true
 		default:
-			rawCmdResult.IsDQL = dbapi.HasReturningClause(cmd)
+			rawCmdResult.IsDQL = dbapi.HasReturningClause(query)
 		}
 	}
 

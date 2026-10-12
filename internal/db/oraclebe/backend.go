@@ -99,7 +99,7 @@ func (b *Backend) Run(stmt string) (db.Result, error) {
 		case strings.HasPrefix(words[0], "("):
 			isDQL = true
 		default:
-			isDQL = db.HasReturningClause(words)
+			isDQL = db.HasReturningClause(stmt)
 		}
 	}
 

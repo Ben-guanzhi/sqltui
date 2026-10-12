@@ -1,7 +1,6 @@
 package postgresbe
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/LinPr/sqltui/internal/db"
@@ -50,10 +49,26 @@ func TestHasReturningClause(t *testing.T) {
 		{"insert into t values (1) returning id", true},
 		{"UPDATE t SET x = 1 RETURNING *", true},
 		{"delete from t where id = 1", false},
+		{"INSERT INTO returning_log (a) VALUES (1)", false},
+		// Words inside literals, quoted identifiers, and comments are not
+		// clauses: none of those statements produces a result set.
+		{"UPDATE t SET note = 'returning'", false},
+		{"UPDATE t SET note = 'no returning here'", false},
+		{"UPDATE t SET \"returning\" = 1", false},
+		{"UPDATE t SET `returning` = 1", false},
+		{"UPDATE t SET [returning] = 1", false},
+		{"UPDATE t SET a = 1 -- returning", false},
+		{"UPDATE t SET a = 1 /* returning */", false},
+		// Escaped quotes do not terminate the literal early.
+		{"UPDATE t SET a = 'it''s returning'", false},
+		// Matching resumes after a comment.
+		{"UPDATE t SET a = 1 -- returning\nDELETE FROM t RETURNING *", true},
+		// Whole words only, never substrings.
+		{"UPDATE t SET returning_flag = 1", false},
+		{"UPDATE t SET a = 1 RETURNINGX", false},
 	}
 	for _, tt := range tests {
-		words := strings.Fields(tt.stmt)
-		if got := db.HasReturningClause(words); got != tt.want {
+		if got := db.HasReturningClause(tt.stmt); got != tt.want {
 			t.Errorf("HasReturningClause(%q) = %v, want %v", tt.stmt, got, tt.want)
 		}
 	}
