@@ -24,6 +24,8 @@ type SearchBar struct {
 
 	// fold 缓存 base 每格的小写形，跨按键复用；随会话起止生灭。
 	fold data.FoldCache
+	// fuzzyCache 缓存 base 按行拼出的整行显示串，同样跨按键复用。
+	fuzzyCache data.FuzzyCache
 }
 
 func (s *SearchBar) Active() bool  { return s.active }
@@ -45,6 +47,7 @@ func (s *SearchBar) StartCols(f *data.Frame, fuzzy bool, cols []int) {
 	s.preview = f
 	s.searchCols = cols
 	s.fold = data.FoldCache{}
+	s.fuzzyCache = data.FuzzyCache{}
 }
 
 // Type appends printable input and recomputes the preview.
@@ -104,7 +107,7 @@ func (s *SearchBar) recompute() {
 	if len(s.searchCols) > 0 {
 		rows = data.SearchExactColsFold(s.base, s.searchCols, s.query, &s.fold)
 	} else if s.fuzzy {
-		rows = data.SearchFuzzy(s.base, s.query)
+		rows = data.SearchFuzzyFold(s.base, s.query, &s.fuzzyCache)
 	} else {
 		rows = data.SearchExact(s.base, s.query)
 	}
@@ -141,6 +144,7 @@ func (s *SearchBar) Cancel() {
 	s.base = nil
 	s.preview = nil
 	s.fold = data.FoldCache{}
+	s.fuzzyCache = data.FuzzyCache{}
 }
 
 // View renders the input line shown at the top of the screen while searching.

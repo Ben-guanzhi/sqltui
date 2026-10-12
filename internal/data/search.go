@@ -1,10 +1,8 @@
 package data
 
 import (
-	"sort"
 	"strings"
-
-	"github.com/sahilm/fuzzy"
+	"unicode"
 )
 
 // SearchExact returns the indices of rows where at least one cell's display
@@ -128,8 +126,66 @@ func SearchExactColsFold(f *Frame, cols []int, needle string, cache *FoldCache) 
 }
 
 // SearchFuzzy returns the indices of rows whose joined display string fuzzily
-// matches needle, in frame order. An empty needle matches every row.
+// matches needle, in frame order. An empty needle matches every row. The cache
+// is nil here: single-shot callers only. Repeated calls over the same frame
+// (one per keystroke in a search session) must use SearchFuzzyFold, which
+// avoids rebuilding the haystack and skips the scoring that was never used.
 func SearchFuzzy(f *Frame, needle string) []int {
+	return SearchFuzzyFold(f, needle, nil)
+}
+
+// FuzzyCache 复用模糊匹配按行拼出的整行显示串，键＝帧指针＋行数＋列数。
+//
+// fuzzy 恒定拼全部列，所以键里不带列集合；也不带每格内容——帧的不可变由类型
+// 系统强制（同 FoldCache：Column.cells 非导出，改一格走 WithCell 换新帧，
+// 换页/换结果也都是新帧）。
+//
+// 第一键付全价，之后的键跳过 Θ(行×列) 的 CellString＋Join。中文格尤其贵——
+// CellString 的 strconv 与 Join 的分配都要付，量尺见 search_fuzzy_bench_test.go。
+type FuzzyCache struct {
+	f      *Frame
+	rows   int
+	ncols  int
+	hay    []string
+	builds int // 建了几次；测试用它钉"必须命中"这条性质
+}
+
+// lookup 键相符时返回缓存的 haystack；键变了就把旧料放掉（避免大帧滞留）。
+func (c *FuzzyCache) lookup(f *Frame) []string {
+	if c == nil || c.hay == nil {
+		return nil
+	}
+	if c.f != f || c.rows != f.NumRows() || c.ncols != len(f.Columns) {
+		*c = FuzzyCache{builds: c.builds}
+		return nil
+	}
+	return c.hay
+}
+
+// build 拼一遍全部行的整行显示串并入库。调用方已确认不超 foldCacheMaxCells。
+func (c *FuzzyCache) build(f *Frame) []string {
+	hay := joinFrameRows(f)
+	*c = FuzzyCache{f: f, rows: f.NumRows(), ncols: len(f.Columns), hay: hay, builds: c.builds + 1}
+	return hay
+}
+
+// joinFrameRows 拼出每行的整行显示串，不入库。超限的帧走这条（＝改前行为）。
+func joinFrameRows(f *Frame) []string {
+	rows := f.NumRows()
+	hay := make([]string, rows)
+	parts := make([]string, len(f.Columns))
+	for r := 0; r < rows; r++ {
+		for c := range f.Columns {
+			parts[c] = f.CellString(r, c)
+		}
+		hay[r] = strings.Join(parts, " ")
+	}
+	return hay
+}
+
+// SearchFuzzyFold 是 SearchFuzzy 的带缓存版本：cache 为 nil 或帧过大时不缓存
+// （haystack 仍照拼，＝改前行为），判定本身逐次重算。
+func SearchFuzzyFold(f *Frame, needle string, cache *FuzzyCache) []int {
 	rows := f.NumRows()
 	if needle == "" {
 		all := make([]int, rows)
@@ -138,19 +194,56 @@ func SearchFuzzy(f *Frame, needle string) []int {
 		}
 		return all
 	}
-	haystack := make([]string, rows)
-	parts := make([]string, len(f.Columns))
-	for r := 0; r < rows; r++ {
-		for c := range f.Columns {
-			parts[c] = f.CellString(r, c)
+	hay := cache.lookup(f)
+	if hay == nil {
+		if cache != nil && rows*len(f.Columns) <= foldCacheMaxCells {
+			hay = cache.build(f)
+		} else {
+			hay = joinFrameRows(f)
 		}
-		haystack[r] = strings.Join(parts, " ")
 	}
-	matches := fuzzy.Find(needle, haystack)
-	out := make([]int, len(matches))
-	for i, m := range matches {
-		out[i] = m.Index
+	return fuzzyMatchIndices(needle, hay)
+}
+
+// fuzzyMatchIndices 按行判定"中/不中"，按帧序返回索引。判据与 fuzzy.Find 逐位
+// 等价（同一行的中/不中一致），但不打分、不排序——SearchFuzzy 只用索引，打分
+// 与 fuzzy.Find 的末尾排序全程是白付的。等价性由 TestSearchFuzzyFoldMatches
+// 差分锁定，库升级改判据时那条测试会先炸。
+func fuzzyMatchIndices(needle string, haystack []string) []int {
+	pat := []rune(needle)
+	if len(pat) == 0 {
+		return nil
 	}
-	sort.Ints(out) // fuzzy.Find sorts by score; restore frame order
+	// fuzzy 的 equalFold 等价于"落在同一条 unicode.SimpleFold 轨道上"，这里
+	// 先把每个模式 rune 的整条轨道展开成集合，匹配时只做整数比较。注意
+	// SimpleFold('k') 是 U+212A 而非 'K'——轨道是三元环，不能用 ToLower 近似
+	//（ToLower('İ') 是 'i'，会误命中 "elvin" 里的 i）。
+	pi := make([]map[rune]struct{}, len(pat))
+	for i, p := range pat {
+		m := map[rune]struct{}{p: {}}
+		cur := unicode.SimpleFold(p)
+		for n := 0; n < 64 && cur != p; n++ {
+			m[cur] = struct{}{}
+			cur = unicode.SimpleFold(cur)
+		}
+		pi[i] = m
+	}
+	out := make([]int, 0)
+	for i, s := range haystack {
+		// fuzzy 也把 haystack 截到首个 NUL：多付一次 IndexByte 换来整行不拆。
+		if j := strings.IndexByte(s, 0); j >= 0 {
+			s = s[:j]
+		}
+		pidx := 0
+		for _, ch := range s {
+			if _, ok := pi[pidx][ch]; ok {
+				pidx++
+				if pidx == len(pat) {
+					out = append(out, i)
+					break
+				}
+			}
+		}
+	}
 	return out
 }
