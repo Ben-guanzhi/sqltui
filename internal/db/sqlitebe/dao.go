@@ -1,8 +1,8 @@
 package sqlitebe
 
 import (
-	"database/sql"
 	"context"
+	"database/sql"
 	"fmt"
 	"os"
 	"strings"

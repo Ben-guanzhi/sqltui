@@ -1,8 +1,8 @@
 package mysqlbe
 
 import (
-	"database/sql"
 	"context"
+	"database/sql"
 	"fmt"
 	"strings"
 	"time"
