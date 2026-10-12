@@ -96,12 +96,29 @@ func (p *Pane) Push(f *data.Frame, crumb string) {
 	p.resetSheet()
 }
 
+// clearTail nils every slot of s so the frames parked there stop being GC
+// roots. Truncating the stack's length is not enough: the runtime walks a
+// slice's backing array by its allocation size, not its len, so slots past
+// len keep their pointers and stay roots — a Reset would pin every dropped
+// derived frame (all its cell strings) until a later Push happened to
+// overwrite them in place. Measured on a throwaway program: truncate-only left
+// 3 of 3 test objects uncollected, nil-then-truncate collected all 3. Safe to
+// clobber: nothing reads past len(p.stack) — Current and Crumbs are both
+// bounded by len — and the next Push appends right here. Capacity is kept so a
+// shallow stack never reallocates.
+func clearTail(s []entry) {
+	for i := range s {
+		s[i] = entry{}
+	}
+}
+
 // Pop removes the top frame. It reports false when the stack is already at
 // its base (the caller then closes the tab instead).
 func (p *Pane) Pop() bool {
 	if len(p.stack) <= 1 {
 		return false
 	}
+	clearTail(p.stack[len(p.stack)-1:])
 	p.stack = p.stack[:len(p.stack)-1]
 	p.Table.ClampTo(p.Current())
 	p.resetSheet()
@@ -111,6 +128,7 @@ func (p *Pane) Pop() bool {
 // Reset drops every derived frame, back to the base.
 func (p *Pane) Reset() {
 	if len(p.stack) > 1 {
+		clearTail(p.stack[1:])
 		p.stack = p.stack[:1]
 	}
 	p.Table.ClampTo(p.Current())
