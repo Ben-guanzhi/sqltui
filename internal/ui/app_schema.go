@@ -6,6 +6,7 @@ package ui
 import (
 	"sync"
 
+	"github.com/LinPr/sqltui/internal/data"
 	"github.com/LinPr/sqltui/internal/db"
 	"github.com/LinPr/sqltui/internal/query"
 )
@@ -23,6 +24,26 @@ type schemaCache struct {
 	cols    map[string][]string        // table -> columns (nil until fetched)
 	meta    map[string][]db.ColumnMeta // table -> full column metadata
 	fetched map[string]bool            // column fetch attempted (even if empty)
+
+	// ver bumps whenever anything above changes the answer CompletionSchema
+	// would compute; snap is the last assembled query.Schema, keyed by
+	// (ver, backend, frame under view, engine schema generation). The SQL
+	// editor calls CompletionSchema once per keystroke while nothing changes
+	// between keys, so the Θ(tables + Σ columns) rebuild must be paid once
+	// per change, not once per key (see BenchmarkCompletionSchemaKeystroke).
+	//
+	// The cached Schema shares its Tables map and column slices with every
+	// caller until invalidated: Suggest/DotTable consume it read-only, and
+	// setting a field on the returned Schema value (as the inline prompt
+	// does with Tables) only touches the caller's copy.
+	ver        int
+	builds     int // snapshot builds; tests pin the must-hit property
+	snap       query.Schema
+	snapOK     bool
+	snapVer    int
+	snapBe     db.Backend
+	snapFrame  *data.Frame
+	snapEngGen uint64
 }
 
 // completionCache returns the app's schema snapshot. The pointer is created
@@ -44,18 +65,47 @@ func (c *schemaCache) resetFor(be db.Backend) {
 	c.cols = make(map[string][]string)
 	c.meta = make(map[string][]db.ColumnMeta)
 	c.fetched = make(map[string]bool)
+	c.ver++
+	c.snapOK = false
 }
 
 // CompletionSchema builds the completion schema without ever blocking on
-// the live connection: engine tables come from PRAGMA lookups against the
-// in-memory database (cheap, safe on the update loop), live tables come
-// from whatever WarmCompletionSchema has cached so far, and Current is the
+// the live connection: engine tables come from the engine's Register-time
+// column cache (cheap, safe on the update loop), live tables come from
+// whatever WarmCompletionSchema has cached so far, and Current is the
 // column set of the frame under view.
+//
+// Between keystrokes none of those inputs change, so the assembled Schema
+// is memoized on schemaCache.snap and handed back as-is (shared map,
+// read-only contract); any catalog mutation, connection swap or frame
+// switch misses the memo and rebuilds.
 func (a *App) CompletionSchema() query.Schema {
-	sc := query.Schema{Current: a.ColumnNames()}
+	// a.Engine() lazily re-registers the frame under view as "_"; the
+	// generation Register/Unregister leave behind keys the memo below.
+	eng := a.Engine()
+	f := a.CurrentFrame()
+	var engGen uint64
+	if eng != nil {
+		engGen = eng.SchemaGeneration()
+	}
+	be := a.backend
+
+	c := a.completionCache()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.snapOK && c.snapVer == c.ver && c.snapBe == be &&
+		c.snapFrame == f && c.snapEngGen == engGen {
+		return c.snap
+	}
+
+	sc := query.Schema{}
+	if f != nil {
+		sc.Current = f.ColumnNames()
+	}
 	tables := make(map[string][]string)
 
-	if eng := a.Engine(); eng != nil {
+	if eng != nil {
 		if m, err := eng.TableColumns(); err == nil {
 			for t, cols := range m {
 				tables[t] = cols
@@ -63,21 +113,21 @@ func (a *App) CompletionSchema() query.Schema {
 		}
 	}
 
-	if be := a.backend; be != nil {
+	if be != nil {
 		sc.Engine = be.Kind()
-		c := a.completionCache()
-		c.mu.Lock()
 		if c.backend == be {
 			for t, cols := range c.cols {
 				tables[t] = append([]string(nil), cols...)
 			}
 		}
-		c.mu.Unlock()
 	}
 
 	if len(tables) > 0 {
 		sc.Tables = tables
 	}
+	c.snap, c.snapOK = sc, true
+	c.snapVer, c.snapBe, c.snapFrame, c.snapEngGen = c.ver, be, f, engGen
+	c.builds++
 	return sc
 }
 
@@ -125,6 +175,7 @@ func (a *App) WarmCompletionSchema(tables ...string) {
 					c.cols[t] = nil // table known, columns pending
 				}
 			}
+			c.ver++
 		}
 		c.mu.Unlock()
 	}
@@ -159,6 +210,7 @@ func (a *App) WarmCompletionSchema(tables ...string) {
 			c.fetched[t] = true
 			c.cols[t] = cols
 			c.meta[t] = meta
+			c.ver++
 		}
 		c.mu.Unlock()
 	}

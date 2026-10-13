@@ -458,6 +458,23 @@ type suggester struct {
 	seen   map[string]bool
 	out    []Suggestion
 	engine string
+	// keys memoizes sortedKeys(sc.Tables): columns and tables both walk it
+	// in the default context, and sorting the same T names twice per
+	// keystroke is pure waste (CLRS ch3: sort once, reuse).
+	keys     []string
+	keysDone bool
+	// buf is scratch for columns(): one per-table match slice reused across
+	// every table instead of allocated per table. add() copies the strings
+	// out, so clobbering the buffer afterwards is safe.
+	buf []string
+}
+
+func (s *suggester) tableKeys(sc Schema) []string {
+	if !s.keysDone {
+		s.keys = sortedKeys(sc.Tables)
+		s.keysDone = true
+	}
+	return s.keys
 }
 
 func (s *suggester) add(text, kind, detail string) {
@@ -474,16 +491,25 @@ func (s *suggester) columns(sc Schema) {
 	for _, c := range sortedMatches(sc.Current, s.token) {
 		s.add(c, KindColumn, "")
 	}
-	for _, t := range sortedKeys(sc.Tables) {
-		for _, c := range sortedMatches(sc.Tables[t], s.token) {
+	for _, t := range s.tableKeys(sc) {
+		start := len(s.buf)
+		for _, c := range sc.Tables[t] {
+			if hasFoldPrefix(c, s.token) {
+				s.buf = append(s.buf, c)
+			}
+		}
+		m := s.buf[start:]
+		sort.Strings(m)
+		for _, c := range m {
 			s.add(c, KindColumn, t)
 		}
+		s.buf = s.buf[:start]
 	}
 }
 
 // tables adds matching table names, sorted, with a column count when known.
 func (s *suggester) tables(sc Schema) {
-	for _, t := range sortedKeys(sc.Tables) {
+	for _, t := range s.tableKeys(sc) {
 		if !hasFoldPrefix(t, s.token) {
 			continue
 		}
