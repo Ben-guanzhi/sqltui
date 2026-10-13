@@ -1,0 +1,24 @@
+# golangci-lint 配置（v2 格式，CI 与 `task lint` 共用）。
+# 默认五件套（errcheck/govet/ineffassign/staticcheck/unused）保持严格；
+# errcheck 只白名单"失败本就无处上报"的资源清理/纯内存写模式（polydb 同款口径）。
+# 存量违约基线（2026-10-13 登记：64 条 = errcheck 50 / staticcheck 7 / unused 7，
+# 白名单落地后剩余见台账 §15）由 PR 流水线的 --new-from-rev 只gate新增，
+# 存量随后续轮次消化，不作全局豁免。
+version: "2"
+
+linters:
+  settings:
+    errcheck:
+      exclude-functions:
+        - "(io.ReadCloser).Close"
+        - "(net.Conn).Close"
+        - "(*os.File).Close"
+        - "(*database/sql.DB).Close"
+        - "(*database/sql.Rows).Close"
+        - "(*database/sql.Stmt).Close"
+        - "(*net/http.Response).Body.Close"
+        - "(net/http.ResponseWriter).Write"
+        - "(*bufio.Writer).WriteString"
+        - "(*bufio.Writer).WriteByte"
+        - "(*bufio.Reader).Discard"
+        - "(*encoding/json.Encoder).Encode"
