@@ -33,7 +33,18 @@ jobs:
         run: go build ./...
 
       - name: test
-        run: go test -count=1 ./...
+        # Surfaces the failing tests as an annotation so the failure is readable
+        # without being able to open the raw job logs.
+        run: |
+          set +e
+          out=$(go test -count=1 ./... 2>&1)
+          rc=$?
+          echo "$out"
+          if [ "$rc" -ne 0 ]; then
+            detail=$(printf '%s' "$out" | grep -E '^(--- FAIL|FAIL|    )' | head -40 | tr '\n' ' ' | head -c 1500)
+            echo "::error title=go test rc=$rc::[$detail]"
+          fi
+          exit "$rc"
 
       # PR-only: --new-from-rev needs github.base_ref, which is empty on push,
       # so the lint diff would resolve to the bogus rev "origin/".
