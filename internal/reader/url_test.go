@@ -1,4 +1,4 @@
-package reader
+package reader_test
 
 import (
 	"net/http"
@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/LinPr/sqltui/internal/reader"
 )
 
 func TestIsURL(t *testing.T) {
@@ -22,7 +24,7 @@ func TestIsURL(t *testing.T) {
 		{"", false},
 	}
 	for _, tt := range tests {
-		if got := IsURL(tt.in); got != tt.want {
+		if got := reader.IsURL(tt.in); got != tt.want {
 			t.Errorf("IsURL(%q) = %v, want %v", tt.in, got, tt.want)
 		}
 	}
@@ -37,7 +39,7 @@ func TestFromURL(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	src, err := FromURL(srv.URL + "/data.csv")
+	src, err := reader.FromURL(srv.URL + "/data.csv")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +72,7 @@ func TestFromURLHTTPError(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	if _, err := FromURL(srv.URL + "/missing.csv"); err == nil {
+	if _, err := reader.FromURL(srv.URL + "/missing.csv"); err == nil {
 		t.Fatal("want error on 404")
 	}
 }
@@ -87,7 +89,7 @@ func TestFromURLFollowsRedirect(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	src, err := FromURL(srv.URL + "/start")
+	src, err := reader.FromURL(srv.URL + "/start")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,17 +103,17 @@ func TestFromURLFollowsRedirect(t *testing.T) {
 func TestDetectURLWithQuery(t *testing.T) {
 	tests := []struct {
 		path string
-		want Format
+		want reader.Format
 	}{
-		{"https://example.com/data.csv?token=abc", FormatCSV},
-		{"https://example.com/data.parquet?a=1&b=2", FormatParquet},
-		{"https://example.com/data.json#frag", FormatJSON},
+		{"https://example.com/data.csv?token=abc", reader.FormatCSV},
+		{"https://example.com/data.parquet?a=1&b=2", reader.FormatParquet},
+		{"https://example.com/data.json#frag", reader.FormatJSON},
 		{"https://example.com/data", ""},
 		{"local.csv?token=x", ""}, // local names keep their '?' verbatim
-		{"plain.csv", FormatCSV},
+		{"plain.csv", reader.FormatCSV},
 	}
 	for _, tt := range tests {
-		if got := Detect(tt.path); got != tt.want {
+		if got := reader.Detect(tt.path); got != tt.want {
 			t.Errorf("Detect(%q) = %q, want %q", tt.path, got, tt.want)
 		}
 	}
@@ -123,7 +125,7 @@ func TestSourceCleanup(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	src, err := FromURL(srv.URL + "/data.csv")
+	src, err := reader.FromURL(srv.URL + "/data.csv")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,7 +139,7 @@ func TestSourceCleanup(t *testing.T) {
 
 	// Cleanup on a plain file source must not delete the file.
 	local := fixtureFileForCleanup(t)
-	fsrc, err := FromFile(local)
+	fsrc, err := reader.FromFile(local)
 	if err != nil {
 		t.Fatal(err)
 	}

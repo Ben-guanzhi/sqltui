@@ -1,9 +1,11 @@
-package theme
+package theme_test
 
 import (
 	"testing"
 
 	"charm.land/lipgloss/v2"
+
+	"github.com/LinPr/sqltui/internal/theme"
 )
 
 // hasBackground reports whether a style sets an explicit background color.
@@ -15,8 +17,8 @@ func hasBackground(s lipgloss.Style) bool {
 // TestBaseStylesTransparent asserts that base styles carry no background so
 // the terminal's own background shows through.
 func TestBaseStylesTransparent(t *testing.T) {
-	for _, name := range Names() {
-		th, ok := Builtin(name)
+	for _, name := range theme.Names() {
+		th, ok := theme.Builtin(name)
 		if !ok {
 			t.Fatalf("Builtin(%q) returned ok=false", name)
 		}
@@ -49,8 +51,8 @@ func TestBaseStylesTransparent(t *testing.T) {
 // TestContrastStylesKeepBackground asserts that the styles whose whole point
 // is a contrasting fill still set one.
 func TestContrastStylesKeepBackground(t *testing.T) {
-	for _, name := range Names() {
-		th, ok := Builtin(name)
+	for _, name := range theme.Names() {
+		th, ok := theme.Builtin(name)
 		if !ok {
 			t.Fatalf("Builtin(%q) returned ok=false", name)
 		}

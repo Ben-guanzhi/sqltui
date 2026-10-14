@@ -1,13 +1,15 @@
-package sqlitebe
+package sqlitebe_test
 
 import (
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/LinPr/sqltui/internal/db/sqlitebe"
 )
 
-func newTestBackend(t *testing.T) *Backend {
+func newTestBackend(t *testing.T) *sqlitebe.Backend {
 	t.Helper()
 
 	file := filepath.Join(t.TempDir(), "adapter.db")
@@ -15,19 +17,19 @@ func newTestBackend(t *testing.T) *Backend {
 		t.Fatal(err)
 	}
 
-	be, err := Connect(Config{FilePath: file})
+	be, err := sqlitebe.Connect(sqlitebe.Config{FilePath: file})
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
 	t.Cleanup(func() {
 		be.Close()
-		DbClinet = nil
+		sqlitebe.DbClinet = nil
 	})
 	return be
 }
 
 func TestConnectRejectsMissingFile(t *testing.T) {
-	if _, err := Connect(Config{FilePath: filepath.Join(t.TempDir(), "nope.db")}); err == nil {
+	if _, err := sqlitebe.Connect(sqlitebe.Config{FilePath: filepath.Join(t.TempDir(), "nope.db")}); err == nil {
 		t.Fatal("expected error for nonexistent file")
 	}
 }
@@ -144,7 +146,7 @@ func TestRunEmptyStatement(t *testing.T) {
 }
 
 func TestTableTarget(t *testing.T) {
-	b := &Backend{}
+	b := &sqlitebe.Backend{}
 	if got := b.TableTarget("anything", "orders"); got != `"orders"` {
 		t.Errorf("target = %s, want \"orders\" (namespace ignored)", got)
 	}

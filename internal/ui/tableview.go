@@ -33,12 +33,13 @@ type TableView struct {
 	snapCursor bool // scroll colCursor into view on next render
 	lastRows   int  // page size observed at last render
 
-	widths widthCache // 每格显示宽度，按帧身份记忆化
+	widths widthCache // per-cell display width, memoized by frame identity
 
-	// 第十轮②a（报告 §14，机制 M1）：限定列那一支的**窗口宽度表**。那一支的子帧每帧新建
-	// （:292），指针做不了键 ⇒ 这块表按**父帧指针＋父帧 rows/ncols＋cols 序列＋窗口坐标
-	// (base,win,mlo,mhi)＋capW** 建键。与上面那块 widthCache 互不相干：非限定列那一支照旧
-	// 只走 `widths`（分流条件与改前 `if len(o.TableCols) == 0` 同一个式子）。
+	// Windowed width table for the column-limited branch. Its sub-frames are
+	// rebuilt every render, so a pointer key cannot work; this table keys on
+	// parent frame pointer + parent rows/ncols + cols sequence + window
+	// coordinates (base,win,mlo,mhi) + capW. Independent of the widthCache
+	// above: the non-column-limited branch continues to use only `widths`.
 	tcWidths tableColsWidthCache
 
 	selected map[int]bool // multi-select membership; lazy-init; nil = none

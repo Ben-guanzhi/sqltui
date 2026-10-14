@@ -54,10 +54,16 @@ type rowsDeletedMsg struct {
 // quoteIdent quotes a SQL identifier for the backend's dialect: backticks for
 // mysql, double quotes otherwise. Embedded quote characters are doubled.
 func quoteIdent(be db.Backend, name string) string {
-	if be != nil && be.Kind() == "mysql" {
-		return "`" + strings.ReplaceAll(name, "`", "``") + "`"
+	if be == nil {
+		return db.QuoteIdentDouble(name)
 	}
-	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
+	if q, ok := be.(db.Quoter); ok {
+		return q.QuoteIdent(name)
+	}
+	if be.Kind() == "mysql" {
+		return db.QuoteIdentBacktick(name)
+	}
+	return db.QuoteIdentDouble(name)
 }
 
 // quoteCol quotes a column identifier for the active dialect.
@@ -73,8 +79,13 @@ func quoteCol(be db.Backend, name string) string {
 // conforming strings, SQL Server, Oracle, SQLite) the backslash is literal
 // and must be left alone.
 func sqlLiteral(be db.Backend, s string) string {
-	if be != nil && be.Kind() == "mysql" {
-		s = strings.ReplaceAll(s, `\`, `\\`)
+	if be != nil {
+		if e, ok := be.(db.Escaper); ok {
+			return e.EscapeLiteral(s)
+		}
+		if be.Kind() == "mysql" {
+			s = strings.ReplaceAll(s, `\`, `\\`)
+		}
 	}
 	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
 }

@@ -118,3 +118,15 @@ type TimeWindowResetter interface {
 type TableTargeter interface {
 	TableTarget(namespace, table string) string
 }
+
+// Quoter quotes a SQL identifier using the engine's own quoting style.
+// MySQL uses backticks, others use double quotes.
+type Quoter interface {
+	QuoteIdent(name string) string
+}
+
+// Escaper wraps a string value as a SQL literal, applying engine-specific
+// escaping (e.g. MySQL doubles backslashes).
+type Escaper interface {
+	EscapeLiteral(s string) string
+}

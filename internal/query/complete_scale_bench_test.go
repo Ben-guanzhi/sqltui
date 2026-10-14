@@ -1,19 +1,20 @@
-package query
+package query_test
 
 import (
 	"fmt"
 	"testing"
 
 	"github.com/LinPr/sqltui/internal/data"
+	"github.com/LinPr/sqltui/internal/query"
 )
 
 // benchCatalogEngine registers nTables tables of nCols columns each into a
 // fresh engine, mimicking a file-mode session where several frames (plus the
 // synced "_" table) are registered and the query editor re-derives the
 // completion schema on every keystroke.
-func benchCatalogEngine(b *testing.B, nTables, nCols int) *Engine {
+func benchCatalogEngine(b *testing.B, nTables, nCols int) *query.Engine {
 	b.Helper()
-	e, err := NewEngine()
+	e, err := query.NewEngine()
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -59,12 +60,12 @@ func BenchmarkSuggestLargeCatalog(b *testing.B) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	sc := Schema{Tables: cols, Current: []string{"id", "col_1_1"}}
+	sc := query.Schema{Tables: cols, Current: []string{"id", "col_1_1"}}
 	input := "select col_1"
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		out := Suggest(input, len(input), sc)
+		out := query.Suggest(input, len(input), sc)
 		if len(out) == 0 {
 			b.Fatal("no suggestions")
 		}
@@ -82,12 +83,12 @@ func BenchmarkDotToken(b *testing.B) {
 		}
 		cols["tbl_"+fmt.Sprintf("%03d", t)] = c
 	}
-	sc := Schema{Tables: cols}
+	sc := query.Schema{Tables: cols}
 	input := "select * from tbl_042 join tbl_007 on tbl_007."
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, ok := DotTable(input, len(input), sc)
+		_, ok := query.DotTable(input, len(input), sc)
 		if !ok {
 			b.Fatal("dot not resolved")
 		}

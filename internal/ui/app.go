@@ -67,8 +67,6 @@ type App struct {
 
 	// syncedFrame caches the frame last registered as "_" (see ensureSynced).
 	syncedFrame *data.Frame
-
-	exiting bool
 }
 
 // toastExpiredMsg clears a toast after its timer fires.
@@ -383,7 +381,6 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyPressMsg:
 		// ctrl+c always quits immediately, regardless of any overlay or mode.
 		if m.String() == "ctrl+c" {
-			a.exiting = true
 			return a, tea.Quit
 		}
 		return a.handleKey(m)
@@ -567,7 +564,6 @@ func (a *App) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	key := msg.String()
 	if key == "ctrl+c" {
-		a.exiting = true
 		return a, tea.Quit
 	}
 
@@ -735,7 +731,8 @@ func (a *App) edgeFollowSheet(f *data.Frame, p *Pane) {
 		visible = 1
 	}
 	dataRow := p.Table.Sel()
-	// 单次 Θ(m) 扫描构建前缀和，count/offset/end 全部 O(1)（SICP 记忆化）。
+	// Single Θ(m) scan builds a prefix sum; count/offset/end are all O(1)
+	// (SICP-style memoization).
 	heights := sheetBodyEntryHeightsCols(f, matched, dataRow, keyW, valW)
 	total := heights[len(matched)]
 	curStart := heights[p.SheetField]
@@ -859,7 +856,6 @@ func (a *App) dispatch(action, key string) tea.Cmd {
 	switch action {
 	// global
 	case ActQuit:
-		a.exiting = true
 		return tea.Quit
 	case ActHelp:
 		return a.runCommand("help", "")
@@ -1105,7 +1101,6 @@ func (a *App) dispatch(action, key string) tea.Cmd {
 func (a *App) pop() tea.Cmd {
 	p := a.pane()
 	if p == nil {
-		a.exiting = true
 		return tea.Quit
 	}
 	if p.Mode == ModeSheet {
@@ -1198,7 +1193,6 @@ func (a *App) escBack() tea.Cmd {
 func (a *App) runCommand(name, arg string) tea.Cmd {
 	switch name {
 	case "quit":
-		a.exiting = true
 		return tea.Quit
 	case "reset":
 		if p := a.pane(); p != nil {
@@ -1377,13 +1371,11 @@ func (a *App) paneByID(id int) *Pane {
 
 func (a *App) closeTab(i int) tea.Cmd {
 	if len(a.tabs) == 0 {
-		a.exiting = true
 		return tea.Quit
 	}
 	i = clamp(i, 0, len(a.tabs)-1)
 	a.tabs = append(a.tabs[:i], a.tabs[i+1:]...)
 	if len(a.tabs) == 0 {
-		a.exiting = true
 		return tea.Quit
 	}
 	// Closing a tab before the active one shifts the slice left; follow the

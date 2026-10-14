@@ -110,6 +110,9 @@ func qxTarget(ctx ui.AppContext) string {
 			return qxQuoteIdent(table)
 		}
 	}
+	if q, ok := be.(db.Quoter); ok {
+		return q.QuoteIdent(ctx.BaseCrumb())
+	}
 	if be != nil && be.Kind() == "mysql" {
 		return "`" + strings.ReplaceAll(ctx.BaseCrumb(), "`", "``") + "`"
 	}

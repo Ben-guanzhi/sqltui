@@ -2,6 +2,7 @@ package mysqlbe
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/LinPr/sqltui/internal/data"
 	"github.com/LinPr/sqltui/internal/db"
@@ -40,6 +41,8 @@ type Backend struct {
 
 var _ db.Backend = (*Backend)(nil)
 var _ db.TableTargeter = (*Backend)(nil)
+var _ db.Quoter = (*Backend)(nil)
+var _ db.Escaper = (*Backend)(nil)
 
 // Connect opens a mysql connection and pings it before returning.
 func Connect(cfg Config) (*Backend, error) {
@@ -133,6 +136,17 @@ func (b *Backend) ColumnsMeta(namespace, table string) ([]db.ColumnMeta, error) 
 // ColumnIndexTypes returns index type labels for indexed columns of namespace.table.
 func (b *Backend) ColumnIndexTypes(namespace, table string) (map[string]string, error) {
 	return b.db.ColumnIndexTypes(namespace, table)
+}
+
+// QuoteIdent quotes an identifier with MySQL backticks, doubling embedded backticks.
+func (b *Backend) QuoteIdent(name string) string {
+	return db.QuoteIdentBacktick(name)
+}
+
+// EscapeLiteral wraps a string as a SQL literal, doubling backslashes (MySQL default sql_mode).
+func (b *Backend) EscapeLiteral(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
 }
 
 func (b *Backend) Close() error {

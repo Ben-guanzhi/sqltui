@@ -1,12 +1,14 @@
-package sqlitebe
+package sqlitebe_test
 
 import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/LinPr/sqltui/internal/db/sqlitebe"
 )
 
-func newTestDB(t *testing.T) *DB {
+func newTestDB(t *testing.T) *sqlitebe.DB {
 	t.Helper()
 
 	file := filepath.Join(t.TempDir(), "test.db")
@@ -14,13 +16,13 @@ func newTestDB(t *testing.T) *DB {
 		t.Fatal(err)
 	}
 
-	db, err := NewDB(file)
+	db, err := sqlitebe.NewDB(file)
 	if err != nil {
 		t.Fatalf("NewDB: %v", err)
 	}
 	t.Cleanup(func() {
 		db.Close()
-		DbClinet = nil
+		sqlitebe.DbClinet = nil
 	})
 
 	if _, err := db.RawExec(`CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)`); err != nil {
@@ -33,7 +35,7 @@ func newTestDB(t *testing.T) *DB {
 }
 
 func TestNewDBRejectsMissingFile(t *testing.T) {
-	if _, err := NewDB(filepath.Join(t.TempDir(), "no-such.db")); err == nil {
+	if _, err := sqlitebe.NewDB(filepath.Join(t.TempDir(), "no-such.db")); err == nil {
 		t.Fatal("expected error for nonexistent file")
 	}
 }
