@@ -34,8 +34,10 @@ import (
 )
 
 const (
-	// 金样目录（盘上唯一权威）。绝不写 /tmp 或 %TEMP%：本机上一轮写在那里的产物已被清空。
-	p13bGoldenDir = `D:\tmp\round9_subframe\impl\golden`
+	// 金样目录（仓库内唯一权威，随代码一起版本化，CI 才跑得起来）。仓库相对路径，
+	// 绝不写 /tmp、%TEMP% 或绝对路径：本机上一轮写在那里的产物已被清空，而绝对路径
+	// 只在作者本机存在，CI 的 Linux 上根本不存在（那会让 38/38 份金样全部读不到）。
+	p13bGoldenDir = "testdata/golden-subframe13"
 	// 期望还没取时，跑测试的人把原因放进这个环境变量；compare 测试把它打进输出。
 	p13bReasonEnv = "SUBFRAME13_GOLDEN_REASON"
 	// 写了金样才允许为 1——平时它是关的，compare 测试才是常跑的那一个。
