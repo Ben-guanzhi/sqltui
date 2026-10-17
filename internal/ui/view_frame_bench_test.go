@@ -709,13 +709,6 @@ func lineAt(s string, n int) string {
 	return ls[n]
 }
 
-func cut(s string) string {
-	if r := []rune(s); len(r) > 90 {
-		return string(r[:90])
-	}
-	return s
-}
-
 // diffAround 返回两行里第一处不同的 rune 偏移，以及各自前后 30 rune 的上下文。
 func diffAround(a, b string) string {
 	ra, rb := []rune(a), []rune(b)

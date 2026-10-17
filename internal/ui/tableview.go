@@ -1104,15 +1104,6 @@ func windowRowBounds(rows, base, limit int) (int, int) {
 	return base, limit
 }
 
-func containsInt(slice []int, v int) bool {
-	for _, x := range slice {
-		if x == v {
-			return true
-		}
-	}
-	return false
-}
-
 // severityColor returns a foreground color hex string for the given severity text.
 // Follows OpenTelemetry conventions: TRACE=gray, DEBUG=blue, INFO=green, WARN=yellow, ERROR=red, FATAL=bright red.
 func severityColor(sev string) string {

@@ -24,6 +24,9 @@ type SearchBar struct {
 
 	// fold 缓存 base 每格的小写形，跨按键复用；随会话起止生灭。
 	fold data.FoldCache
+	// cell 缓存 base 每格的显示原文（不折叠），供全列精确搜索的按键路径
+	// 复用：SearchExact 本身大小写敏感，不能借用 ToLower 的 fold。
+	cell data.CellCache
 	// fuzzyCache 缓存 base 按行拼出的整行显示串，同样跨按键复用。
 	fuzzyCache data.FuzzyCache
 }
@@ -47,6 +50,7 @@ func (s *SearchBar) StartCols(f *data.Frame, fuzzy bool, cols []int) {
 	s.preview = f
 	s.searchCols = cols
 	s.fold = data.FoldCache{}
+	s.cell = data.CellCache{}
 	s.fuzzyCache = data.FuzzyCache{}
 }
 
@@ -109,7 +113,9 @@ func (s *SearchBar) recompute() {
 	} else if s.fuzzy {
 		rows = data.SearchFuzzyFold(s.base, s.query, &s.fuzzyCache)
 	} else {
-		rows = data.SearchExact(s.base, s.query)
+		// The plain all-column path is case-sensitive, so it reuses the
+		// un-folded CellCache instead of the ToLower-ed fold cache.
+		rows = data.SearchExactCached(s.base, s.query, &s.cell)
 	}
 	s.preview = s.base.Select(rows)
 }
@@ -144,6 +150,7 @@ func (s *SearchBar) Cancel() {
 	s.base = nil
 	s.preview = nil
 	s.fold = data.FoldCache{}
+	s.cell = data.CellCache{}
 	s.fuzzyCache = data.FuzzyCache{}
 }
 

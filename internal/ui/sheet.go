@@ -184,33 +184,6 @@ func sheetKeyEntryHeightCols(f *data.Frame, cols []int, pos, keyW int) int {
 	return sheetKeyEntryHeight(f, cols[pos], keyW)
 }
 
-// sheetKeyLineOffsetCols returns the left-list line index where the entry at
-// position pos in cols begins (the sum of entry heights of all preceding
-// matched positions).
-func sheetKeyLineOffsetCols(f *data.Frame, cols []int, pos, keyW int) int {
-	if f == nil || pos <= 0 {
-		return 0
-	}
-	n := 0
-	for c := 0; c < pos && c < len(cols); c++ {
-		n += sheetKeyEntryHeight(f, cols[c], keyW)
-	}
-	return n
-}
-
-// sheetKeyLineCountCols reports the total left-list line count across every
-// matched entry in cols.
-func sheetKeyLineCountCols(f *data.Frame, cols []int, keyW int) int {
-	if f == nil {
-		return 0
-	}
-	n := 0
-	for _, c := range cols {
-		n += sheetKeyEntryHeight(f, c, keyW)
-	}
-	return n
-}
-
 // sheetBodyEntryHeightCols returns the number of body lines entry at position
 // pos occupies in renderSheet. All entries (cursor and compact) use
 // max(key height, value height) so both views expand to fit multi-line values.
@@ -514,30 +487,6 @@ func sheetFilterLine(filter string, filtering bool, inner int, th *theme.Theme) 
 	return FilterLine(filter, filtering, inner, "type to filter fields", th)
 }
 
-// sheetKeyList renders every field's key name as one or more wrapped lines,
-// highlighting the cursor entry with th.RowSelected. Each rendered line is
-// padded to keyW cells.
-func sheetKeyList(f *data.Frame, keyW, fieldCursor int, th *theme.Theme) []string {
-	var lines []string
-	for c := range f.Columns {
-		name := sheetSanitize(f.Columns[c].Name)
-		if name == "" {
-			name = " "
-		}
-		wrapped := strings.Split(ansi.Wrap(name, keyW, ""), "\n")
-		cursor := c == fieldCursor
-		keyStyle := th.Header
-		if cursor {
-			keyStyle = th.RowSelected
-		}
-		for _, wl := range wrapped {
-			cell := keyStyle.Render(padLine(wl, keyW))
-			lines = append(lines, cell)
-		}
-	}
-	return lines
-}
-
 // sheetRenderValueLine renders one wrapped value line at valW width. When
 // editing and this line contains the edit cursor cell, the cursor cell is
 // rendered with the selection style as a block cursor.
@@ -572,17 +521,6 @@ func sheetRenderValueLine(line string, valW int, editing bool, editRunes []rune,
 		rendered += th.Input.Render(strings.Repeat(" ", pad))
 	}
 	return rendered
-}
-
-// drawerLeftWidth returns the width of the left (key list) pane when the
-// sheet is in drawer-edit mode. The left pane takes 2/5 of the total width,
-// with a minimum of 10 columns.
-func drawerLeftWidth(totalW int) int {
-	w := totalW * 2 / 5
-	if w < 10 {
-		return 10
-	}
-	return w
 }
 
 // renderSheetDrawer renders the right-side editing drawer for the active sheet field.

@@ -134,6 +134,86 @@ func SearchFuzzy(f *Frame, needle string) []int {
 	return SearchFuzzyFold(f, needle, nil)
 }
 
+// CellCache caches the per-cell display string WITHOUT folding, for the
+// case-sensitive exact-search session: the plain search path recomputes
+// every cell's CellString on every keystroke (the per-cell strconv/format is
+// the residue the fold caches kill on their paths, but only ToLower-ed
+// values - the plain path must keep case-sensitive matching, so it gets its
+// own cache of the raw display). Keying and the size cap follow FoldCache
+// exactly; over the cap the caller computes on the fly, which is what
+// SearchExact does today and cannot be slower.
+type CellCache struct {
+	f      *Frame
+	rows   int
+	ncols  int
+	vals   [][]string
+	builds int // 建了几次；测试用它钉"必须命中"这条性质
+}
+
+// lookup 键相符时返回缓存的显示串；键变了就把旧料放掉（避免大帧滞留）。
+func (c *CellCache) lookup(f *Frame) [][]string {
+	if c == nil || c.vals == nil {
+		return nil
+	}
+	if c.f != f || c.rows != f.NumRows() || c.ncols != len(f.Columns) {
+		*c = CellCache{builds: c.builds}
+		return nil
+	}
+	return c.vals
+}
+
+// build 扫一遍全部列，存下每格的显示串（不折叠，大小写语义归调用方）。
+func (c *CellCache) build(f *Frame) [][]string {
+	if c == nil || f == nil {
+		return nil
+	}
+	rows := f.NumRows()
+	vals := make([][]string, len(f.Columns))
+	for ci := range f.Columns {
+		v := make([]string, rows)
+		for r := 0; r < rows; r++ {
+			v[r] = f.CellString(r, ci)
+		}
+		vals[ci] = v
+	}
+	*c = CellCache{f: f, rows: rows, ncols: len(f.Columns), vals: vals, builds: c.builds + 1}
+	return vals
+}
+
+// SearchExactCached is the cached version of SearchExact with the exact
+// same case-sensitive semantics: cache nil or the frame too large computes
+// every cell on the fly (＝ SearchExact). The frame must be the immutable
+// one the session started on - WithCell / repage / new result all hand out
+// new frames, which invalidate the cache by pointer.
+func SearchExactCached(f *Frame, needle string, cache *CellCache) []int {
+	rows := f.NumRows()
+	if needle == "" {
+		out := make([]int, 0, rows)
+		for r := 0; r < rows; r++ {
+			out = append(out, r)
+		}
+		return out
+	}
+	vals := cache.lookup(f)
+	if vals == nil && rows*len(f.Columns) <= foldCacheMaxCells {
+		vals = cache.build(f)
+	}
+	out := make([]int, 0, rows)
+	for r := 0; r < rows; r++ {
+		for ci := range f.Columns {
+			cell := f.CellString(r, ci)
+			if vals != nil {
+				cell = vals[ci][r]
+			}
+			if strings.Contains(cell, needle) {
+				out = append(out, r)
+				break
+			}
+		}
+	}
+	return out
+}
+
 // FuzzyCache 复用模糊匹配按行拼出的整行显示串，键＝帧指针＋行数＋列数。
 //
 // fuzzy 恒定拼全部列，所以键里不带列集合；也不带每格内容——帧的不可变由类型

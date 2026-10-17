@@ -588,29 +588,6 @@ func sortedMatches(cands []string, token string) []string {
 	return out
 }
 
-// sortedMatchesSorted is sortedMatches optimized for pre-sorted candidate
-// lists: it binary-searches the first string whose uppercase form has the
-// uppercase token as a prefix, then scans forward while the prefix holds.
-// O(log n + k) vs O(n) for the unsorted variant.
-func sortedMatchesSorted(cands []string, token string) []string {
-	if token == "" {
-		return append([]string(nil), cands...)
-	}
-	up := strings.ToUpper(token)
-	lo := sort.Search(len(cands), func(i int) bool {
-		return strings.ToUpper(cands[i]) >= up
-	})
-	out := make([]string, 0, len(cands)-lo)
-	for i := lo; i < len(cands); i++ {
-		if strings.HasPrefix(strings.ToUpper(cands[i]), up) {
-			out = append(out, cands[i])
-		} else {
-			break
-		}
-	}
-	return out
-}
-
 func sortedKeys(m map[string][]string) []string {
 	out := make([]string, 0, len(m))
 	for k := range m {
