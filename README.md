@@ -208,6 +208,14 @@ Logs go to `~/.config/sqltui/sqltui.log`.
 - The theme selector previews live as you move the highlight — `enter`
   keeps it, `esc` reverts to the previous theme.
 
+## Integration status (2026-10-23)
+
+Per the shared-kernel plan in [../WORKSPACE.md](../WORKSPACE.md), this client is a
+phase-2 candidate and is unchanged in this round. Next step: adapt the SQL engine
+to `dbcore.SQLDriver` and route identifier/paging/catalog text through
+`dbcore/sqltext`; file/parquet/excel loaders stay outside the relational core.
+
+
 
 
 
