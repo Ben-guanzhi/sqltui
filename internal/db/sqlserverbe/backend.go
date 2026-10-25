@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/dbcore/dbcore"
+	_ "github.com/dbcore/dbcore/mssql" // registers the mssql factory
 
 	"github.com/LinPr/sqltui/internal/db"
 	"github.com/LinPr/sqltui/internal/db/core"
@@ -152,17 +153,27 @@ func (b *Backend) Tables(namespace string) ([]string, error) {
 
 // PrimaryKeys lists the primary-key column names of database.table in
 // key-ordinal order, across the named database (empty = current database).
+// The join through TABLE_CONSTRAINTS is the portable spelling: the old
+// OBJECTPROPERTY(OBJECT_ID(<table>), 'IsPrimaryKey') trick tested that
+// property against the table object, where it is always 0 — it is a
+// constraint-object property — so PrimaryKeys returned empty for every
+// table (caught by the live smoke).
 func (b *Backend) PrimaryKeys(namespace, table string) ([]string, error) {
-	query := `SELECT COLUMN_NAME
-		FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE
-		WHERE OBJECTPROPERTY(OBJECT_ID(TABLE_CATALOG + '.' + TABLE_SCHEMA + '.' + TABLE_NAME), 'IsPrimaryKey') = 1
-		AND TABLE_NAME = @p1`
+	query := `SELECT ku.COLUMN_NAME
+		FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE ku
+		JOIN INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc
+			ON tc.CONSTRAINT_NAME = ku.CONSTRAINT_NAME
+			AND tc.TABLE_CATALOG = ku.TABLE_CATALOG
+			AND tc.TABLE_SCHEMA = ku.TABLE_SCHEMA
+			AND tc.TABLE_NAME = ku.TABLE_NAME
+		WHERE tc.CONSTRAINT_TYPE = 'PRIMARY KEY'
+		AND ku.TABLE_NAME = @p1`
 	args := []dbcore.Value{textArg(table)}
 	if namespace != "" {
-		query += ` AND TABLE_CATALOG = @p2`
+		query += ` AND ku.TABLE_CATALOG = @p2`
 		args = append(args, textArg(namespace))
 	}
-	res, err := b.query(query+" ORDER BY ORDINAL_POSITION", args...)
+	res, err := b.query(query+" ORDER BY ku.ORDINAL_POSITION", args...)
 	if err != nil {
 		return nil, err
 	}
@@ -212,8 +223,8 @@ func (b *Backend) ColumnIndexTypes(namespace, table string) (map[string]string, 
 	res, err := b.query(`SELECT
 		i.name AS index_name,
 		COL_NAME(ic.object_id, ic.column_id) AS column_name,
-		i.is_unique,
-		i.is_primary_key
+		CAST(i.is_unique AS int) AS is_unique,
+		CAST(i.is_primary_key AS int) AS is_pk
 		FROM sys.indexes i
 		INNER JOIN sys.index_columns ic ON i.object_id = ic.object_id AND i.index_id = ic.index_id
 		WHERE i.object_id = OBJECT_ID(@p1 + '.dbo.' + @p2)
