@@ -202,3 +202,64 @@ func TestConnectThroughAdapterFile(t *testing.T) {
 		t.Fatalf("Tables = %v, %v", tables, err)
 	}
 }
+
+// TestRunBoundEndToEnd exercises the parameter-bound execution path against a
+// real kernel driver: user text rides as an argument, never as statement
+// text, and native types (int64 keys) match without string coercion.
+func TestRunBoundEndToEnd(t *testing.T) {
+	b := newSQLiteBackend(t)
+	for _, stmt := range []string{
+		`CREATE TABLE t (id INTEGER PRIMARY KEY, name TEXT)`,
+		`INSERT INTO t VALUES (1, 'ann'), (2, 'bob')`,
+	} {
+		if _, err := b.Run(stmt); err != nil {
+			t.Fatalf("%s: %v", stmt, err)
+		}
+	}
+
+	// UPDATE ... SET name = ? WHERE id = ? with a quote-laden value.
+	res, err := b.RunBound(`UPDATE t SET name = ? WHERE id = ?`, []any{"it's a \"test\"", int64(2)})
+	if err != nil {
+		t.Fatalf("RunBound update: %v", err)
+	}
+	if res.Exec == nil || res.Exec.RowsAffected != 1 {
+		t.Fatalf("update result = %+v", res.Exec)
+	}
+
+	got, err := b.RunBound(`SELECT name FROM t WHERE id = ?`, []any{int64(2)})
+	if err != nil {
+		t.Fatalf("RunBound select: %v", err)
+	}
+	if got.Frame == nil || got.Frame.NumRows() != 1 || got.Frame.Cell(0, 0) != `it's a "test"` {
+		t.Fatalf("select frame = %+v", got.Frame)
+	}
+
+	// DELETE with an IN list bound natively.
+	res, err = b.RunBound(`DELETE FROM t WHERE id IN (?, ?)`, []any{int64(1), int64(2)})
+	if err != nil {
+		t.Fatalf("RunBound delete: %v", err)
+	}
+	if res.Exec == nil || res.Exec.RowsAffected != 2 {
+		t.Fatalf("delete result = %+v", res.Exec)
+	}
+
+	// NULL binds as NULL, not as the empty string.
+	if _, err := b.Run(`INSERT INTO t VALUES (3, 'x')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.RunBound(`UPDATE t SET name = ? WHERE id = ?`, []any{nil, int64(3)}); err != nil {
+		t.Fatalf("null bind: %v", err)
+	}
+	got, err = b.RunBound(`SELECT name FROM t WHERE id = ?`, []any{int64(3)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Frame == nil || got.Frame.Cell(0, 0) != nil {
+		t.Fatalf("NULL round trip = %#v", got.Frame.Cell(0, 0))
+	}
+
+	// Empty statement still errors.
+	if _, err := b.RunBound("  ", nil); err == nil {
+		t.Fatal("expected empty-statement error")
+	}
+}

@@ -55,6 +55,7 @@ type Backend struct {
 
 var (
 	_ db.Backend       = (*Backend)(nil)
+	_ db.BoundRunner   = (*Backend)(nil)
 	_ db.TableTargeter = (*Backend)(nil)
 	_ db.Quoter        = (*Backend)(nil)
 	_ db.Escaper       = (*Backend)(nil)
@@ -82,20 +83,39 @@ func (b *Backend) Run(stmt string) (db.Result, error) {
 	if strings.TrimSpace(stmt) == "" {
 		return db.Result{}, fmt.Errorf("empty query")
 	}
+	return b.RunBound(stmt, nil)
+}
+
+// RunBound is Run with bound parameters: values ride as driver arguments
+// (dbcore.ValueOf), never as concatenated text — the P0-4 rule.
+func (b *Backend) RunBound(stmt string, args []any) (db.Result, error) {
+	if strings.TrimSpace(stmt) == "" {
+		return db.Result{}, fmt.Errorf("empty query")
+	}
+	vals := make([]dbcore.Value, len(args))
+	for i, a := range args {
+		vals[i] = dbcore.ValueOf(a)
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), QueryTimeout)
 	defer cancel()
-	res, err := b.drv.Execute(ctx, stmt)
+	res, err := b.drv.Execute(ctx, stmt, vals...)
 	if err != nil {
 		return db.Result{}, err
 	}
+	return b.result(res), nil
+}
+
+// result maps a kernel QueryResult onto the sqltui Result shape: a column
+// list means rows came back, anything else is an exec outcome.
+func (b *Backend) result(res *dbcore.QueryResult) db.Result {
 	if len(res.Columns) > 0 {
-		return db.Result{Frame: FrameFromResult(res)}, nil
+		return db.Result{Frame: FrameFromResult(res)}
 	}
 	exec := &db.ExecResult{RowsAffected: res.AffectedRows, HasLastInsert: b.opt.HasLastInsertID}
 	if b.opt.HasLastInsertID {
 		exec.LastInsertID = res.LastInsertID
 	}
-	return db.Result{Exec: exec}, nil
+	return db.Result{Exec: exec}
 }
 
 // Namespaces lists the server's databases (mysql) or schemas (postgres,

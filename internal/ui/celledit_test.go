@@ -350,3 +350,200 @@ func TestCommitRowDeleteFileMode(t *testing.T) {
 		t.Errorf("surviving row = %v, want bob", v)
 	}
 }
+
+// boundEditBackend extends cellEditBackend with RunBound, recording the
+// statement and arguments it received.
+type boundEditBackend struct {
+	cellEditBackend
+	lastArgs []any
+}
+
+func (b *boundEditBackend) RunBound(stmt string, args []any) (db.Result, error) {
+	b.last = stmt
+	b.lastArgs = args
+	return b.res, b.err
+}
+
+func TestBuildUpdateBoundShapes(t *testing.T) {
+	frame := cellEditFrame()
+	cases := []struct {
+		kind string
+		stmt string
+		args []any
+	}{
+		{"postgres", `UPDATE "users" SET "name"=$1 WHERE "id"=$2`, []any{"x", int64(2)}},
+		{"mysql", "UPDATE `users` SET `name`=? WHERE `id`=?", []any{"x", int64(2)}},
+		// The stub has no Quoter, so identifiers render with the double-quote
+		// fallback; the placeholder spelling is what varies by engine here.
+		{"sqlserver", `UPDATE "users" SET "name"=@p1 WHERE "id"=@p2`, []any{"x", int64(2)}},
+		{"oracle", `UPDATE "users" SET "name"=:1 WHERE "id"=:2`, []any{"x", int64(2)}},
+	}
+	for _, c := range cases {
+		be := &cellEditBackend{kind: c.kind}
+		stmt, args, err := buildUpdateBound(be, "users", []string{"id"}, frame, 1, "name", "x")
+		if err != nil {
+			t.Fatalf("%s: %v", c.kind, err)
+		}
+		if stmt != c.stmt {
+			t.Errorf("%s stmt = %q, want %q", c.kind, stmt, c.stmt)
+		}
+		if len(args) != len(c.args) {
+			t.Fatalf("%s args = %#v, want %#v", c.kind, args, c.args)
+		}
+		for i := range args {
+			if args[i] != c.args[i] {
+				t.Errorf("%s args[%d] = %#v, want %#v", c.kind, i, args[i], c.args[i])
+			}
+		}
+	}
+}
+
+func TestBuildUpdateBoundMultiPKAndErrors(t *testing.T) {
+	pg := &cellEditBackend{kind: "postgres"}
+	frame := cellEditFrame()
+	stmt, args, err := buildUpdateBound(pg, "t", []string{"id", "ns"}, frame, 2, "name", "x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `UPDATE "t" SET "name"=$1 WHERE "id"=$2 AND "ns"=$3`
+	if stmt != want {
+		t.Errorf("stmt = %q, want %q", stmt, want)
+	}
+	if len(args) != 3 || args[1] != int64(3) || args[2] != "c" {
+		t.Errorf("args = %#v, want [x 3 c]", args)
+	}
+
+	if _, _, err := buildUpdateBound(pg, "t", nil, frame, 0, "name", "x"); err == nil || !strings.Contains(err.Error(), "no primary key") {
+		t.Fatalf("expected no-pk error, got %v", err)
+	}
+	if _, _, err := buildUpdateBound(pg, "t", []string{"missing"}, frame, 0, "name", "x"); err == nil || !strings.Contains(err.Error(), "primary key column not found") {
+		t.Fatalf("expected missing-pk error, got %v", err)
+	}
+	if _, _, err := buildUpdateBound(pg, "t", []string{"id"}, frame, 0, "name", "abc"); err == nil || !strings.Contains(err.Error(), "expected") {
+		// name is TypeString in the fixture, so this must succeed; force a
+		// typed column instead below.
+		t.Logf("string column accepted %v (ok)", err)
+	}
+}
+
+func TestBuildUpdateBoundTypeValidation(t *testing.T) {
+	pg := &cellEditBackend{kind: "postgres"}
+	frame := cellEditFrame() // id is TypeInt
+	if _, _, err := buildUpdateBound(pg, "users", []string{"id"}, frame, 0, "id", "not-a-number"); err == nil {
+		t.Fatal("expected integer parse error for int column")
+	}
+}
+
+func TestBuildDeleteBoundShapes(t *testing.T) {
+	frame := cellEditFrame()
+	pg := &cellEditBackend{kind: "postgres"}
+	stmt, args, err := buildDeleteBound(pg, "users", []string{"id"}, frame, []int{0, 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `DELETE FROM "users" WHERE "id" IN ($1,$2)`
+	if stmt != want {
+		t.Errorf("pg stmt = %q, want %q", stmt, want)
+	}
+	if len(args) != 2 || args[0] != int64(1) || args[1] != int64(3) {
+		t.Errorf("args = %#v, want [1 3]", args)
+	}
+
+	mysql := &cellEditBackend{kind: "mysql"}
+	stmt, args, err = buildDeleteBound(mysql, "users", []string{"id"}, frame, []int{1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stmt != "DELETE FROM `users` WHERE `id` IN (?)" || len(args) != 1 || args[0] != int64(2) {
+		t.Errorf("mysql stmt = %q args = %#v", stmt, args)
+	}
+
+	multi := &cellEditBackend{kind: "sqlserver"} // stub without Quoter: double-quote fallback; the placeholder numbering is what's under test
+	stmt, args, err = buildDeleteBound(multi, "t", []string{"id", "ns"}, frame, []int{0, 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want = `DELETE FROM "t" WHERE ("id"=@p1 AND "ns"=@p2) OR ("id"=@p3 AND "ns"=@p4)`
+	if stmt != want {
+		t.Errorf("mssql multi-pk stmt = %q, want %q", stmt, want)
+	}
+	if len(args) != 4 || args[0] != int64(1) || args[1] != "a" || args[2] != int64(2) || args[3] != "b" {
+		t.Errorf("args = %#v", args)
+	}
+
+	if _, _, err := buildDeleteBound(pg, "t", nil, frame, []int{0}); err == nil {
+		t.Fatal("expected no-pk error")
+	}
+}
+
+func TestBindValue(t *testing.T) {
+	if v, err := bindValue("42", data.TypeInt); err != nil || v != int64(42) {
+		t.Errorf("int: %v %v", v, err)
+	}
+	if v, err := bindValue("1.5", data.TypeFloat); err != nil || v != 1.5 {
+		t.Errorf("float: %v %v", v, err)
+	}
+	if v, err := bindValue("true", data.TypeBool); err != nil || v != true {
+		t.Errorf("bool: %v %v", v, err)
+	}
+	// Dates stay text: engines parse date literals from strings.
+	if v, err := bindValue("2026-10-25", data.TypeDate); err != nil || v != "2026-10-25" {
+		t.Errorf("date: %v %v", v, err)
+	}
+	if _, err := bindValue("abc", data.TypeInt); err == nil {
+		t.Error("expected error for non-integer int column")
+	}
+}
+
+func TestCommitCellEditBoundPath(t *testing.T) {
+	be := &boundEditBackend{cellEditBackend: cellEditBackend{kind: "postgres", pks: []string{"id"},
+		res: db.Result{Exec: &db.ExecResult{RowsAffected: 1}}}}
+	ctx := &cellEditCtx{frame: cellEditFrame(), be: be, paneID: 7}
+	pe := PendingEdit{Frame: ctx.frame, Row: 1, Col: 1, ColName: "name", NewValue: "zoe", Table: "users"}
+	msg := commitCellEdit(ctx, pe)()
+	m, ok := msg.(cellSavedMsg)
+	if !ok || m.err != nil || m.rows != 1 {
+		t.Fatalf("msg = %#v", msg)
+	}
+	if !strings.HasPrefix(be.last, `UPDATE "users" SET "name"=$1`) {
+		t.Errorf("backend saw %q", be.last)
+	}
+	// The new value and the PK bind as native types, not quoted text.
+	if len(be.lastArgs) != 2 || be.lastArgs[0] != "zoe" || be.lastArgs[1] != int64(2) {
+		t.Errorf("args = %#v, want [zoe 2]", be.lastArgs)
+	}
+}
+
+func TestCommitRowDeleteBoundPath(t *testing.T) {
+	be := &boundEditBackend{cellEditBackend: cellEditBackend{kind: "postgres", pks: []string{"id"},
+		res: db.Result{Exec: &db.ExecResult{RowsAffected: 2}}}}
+	ctx := &cellEditCtx{frame: cellEditFrame(), be: be, paneID: 1}
+	pd := PendingDelete{Frame: ctx.frame, Rows: []int{0, 2}, Table: "users"}
+	msg := commitRowDelete(ctx, pd)()
+	m, ok := msg.(rowsDeletedMsg)
+	if !ok || m.err != nil || m.rows != 2 {
+		t.Fatalf("msg = %#v", msg)
+	}
+	if be.last != `DELETE FROM "users" WHERE "id" IN ($1,$2)` {
+		t.Errorf("backend saw %q", be.last)
+	}
+	if len(be.lastArgs) != 2 || be.lastArgs[0] != int64(1) || be.lastArgs[1] != int64(3) {
+		t.Errorf("args = %#v", be.lastArgs)
+	}
+}
+
+func TestRunnerFallsBackWithoutBoundRunner(t *testing.T) {
+	be := &cellEditBackend{kind: "postgres"} // no RunBound
+	r := runnerFor(be)
+	if r.binds() {
+		t.Fatal("plain backend must not report binds")
+	}
+	res, err := r.run("UPDATE t SET a = '1'", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = res
+	if be.last != "UPDATE t SET a = '1'" {
+		t.Errorf("backend saw %q", be.last)
+	}
+}

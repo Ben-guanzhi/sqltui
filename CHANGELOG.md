@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Query history and navigation
 
 ### Changed
+- Cell edits and row deletes execute as parameter-bound statements (`db.BoundRunner` capability, kernel `Execute` with bind arguments): user text never reaches the statement text, PK values bind in their native types, and new values are parsed by the column type before binding. Backends without binding (OpenObserve) keep the inline-literal path; the placeholder spelling (`?`/`$n`/`@pn`/`:n`) comes from the kernel dialect
 - SQL engines and Redis dial through the shared dbcore kernel (`dbcore.Open` + per-engine `ConnSpec`): statement routing, catalog metadata, identifier quoting, literals, and row limits come from the kernel; the per-engine DAOs (~1,700 lines of catalog SQL) are gone
 - Read-statement routing gained `DESC`/`DESCRIBE` and `INSERT`/`UPDATE`/`DELETE ... RETURNING` (kernel `IsReadQuery`, contributed upstream)
 - Query results keep native types: NULL is no longer collapsed to the empty string on MySQL/PostgreSQL/SQLite

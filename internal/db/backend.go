@@ -130,3 +130,12 @@ type Quoter interface {
 type Escaper interface {
 	EscapeLiteral(s string) string
 }
+
+// BoundRunner executes a statement with bound parameters: values ride as
+// driver arguments (nil / string / int64 / float64 / bool / time.Time /
+// []byte), never as concatenated text. Backends backed by the dbcore kernel
+// implement this; the cell editor uses it for its UPDATE/DELETE statements
+// and falls back to inline literals only for backends without it.
+type BoundRunner interface {
+	RunBound(stmt string, args []any) (Result, error)
+}
