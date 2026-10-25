@@ -101,8 +101,8 @@ func Connect(cfg Config) (*Backend, error) {
 		return nil, fmt.Errorf("redis: kernel driver is not a KV driver")
 	}
 	b := &Backend{
-		kv:    kv,
-		addr:  spec.Addr(),
+		kv:     kv,
+		addr:   spec.Addr(),
 		rdbNum: rdbNum,
 	}
 	// Optional kernel capabilities; Do and ScanKeys degrade when absent.

@@ -91,9 +91,9 @@ func Connect(cfg Config) (*Backend, error) {
 	}
 	return &Backend{
 		Backend: core.New(sqlDrv, core.Options{
-			Kind:    "sqlserver",
-			Title:   fmt.Sprintf("sqlserver://%s/%s", strings.TrimSpace(cfg.Host), strings.TrimSpace(cfg.DbName)),
-			Target:  Target,
+			Kind:      "sqlserver",
+			Title:     fmt.Sprintf("sqlserver://%s/%s", strings.TrimSpace(cfg.Host), strings.TrimSpace(cfg.DbName)),
+			Target:    Target,
 			CurrentNS: func(context.Context) string { return strings.TrimSpace(cfg.DbName) },
 		}),
 		drv: sqlDrv,

@@ -74,8 +74,8 @@ func Connect(cfg Config) (*Backend, error) {
 		return nil, fmt.Errorf("postgres: kernel driver is not an SQL driver")
 	}
 	return &Backend{Backend: core.New(sql, core.Options{
-		Kind:  "postgres",
-		Title: fmt.Sprintf("postgres://%s/%s", strings.TrimSpace(cfg.Host), strings.TrimSpace(cfg.DbName)),
+		Kind:   "postgres",
+		Title:  fmt.Sprintf("postgres://%s/%s", strings.TrimSpace(cfg.Host), strings.TrimSpace(cfg.DbName)),
 		Target: Target,
 		// The browser scopes its listing to the schema new objects resolve to
 		// (usually "public"); the query keeps working after ALTER ROLE ... SET

@@ -89,9 +89,9 @@ func Connect(cfg Config) (*Backend, error) {
 		return nil, fmt.Errorf("oracle: kernel driver is not an SQL driver")
 	}
 	return &Backend{Backend: core.New(sql, core.Options{
-		Kind:    "oracle",
-		Title:   fmt.Sprintf("oracle://%s/%s", strings.TrimSpace(cfg.Host), strings.TrimSpace(cfg.DbName)),
-		Target:  Target,
+		Kind:      "oracle",
+		Title:     fmt.Sprintf("oracle://%s/%s", strings.TrimSpace(cfg.Host), strings.TrimSpace(cfg.DbName)),
+		Target:    Target,
 		CurrentNS: func(context.Context) string { return strings.TrimSpace(cfg.UserName) },
 	})}, nil
 }
