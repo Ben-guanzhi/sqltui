@@ -16,9 +16,29 @@ jobs:
         with:
           fetch-depth: 0
 
+      # Same sibling replaces as CI: go.mod declares
+      # `replace github.com/dbcore/dbcore => ../dbcore`, and nothing else on this
+      # runner provides that directory, so a tag-triggered release would fail at
+      # the first go build. See PUBLISH-BLOCKER-dbcore-module-path-2026-10-26.md
+      # at the workspace root.
+      - name: check out dbcore (sibling, for the local replace)
+        env:
+          DBCORE_TOKEN: ${{ secrets.DBCORE_CHECKOUT_TOKEN }}
+        run: |
+          set -eu
+          dest="$(dirname "$GITHUB_WORKSPACE")/dbcore"
+          if [ -n "${DBCORE_TOKEN:-}" ]; then
+            hdr="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$DBCORE_TOKEN" | base64 -w0)"
+            git -c "http.extraheader=$hdr" clone --depth 1 https://github.com/Ben-guanzhi/dbcore.git "$dest"
+          else
+            git clone --depth 1 https://github.com/Ben-guanzhi/dbcore.git "$dest"
+          fi
+
+      # Same pin as ci.yml: build releases with the toolchain the tree is
+      # formatted with (see the note there).
       - uses: actions/setup-go@v6
         with:
-          go-version-file: go.mod
+          go-version: '1.27.1'
 
       - name: Get version
         id: version

@@ -14,9 +14,45 @@ jobs:
         with:
           fetch-depth: 0
 
+      # This repo resolves the shared kernel through a local replace in go.mod
+      # (`replace github.com/dbcore/dbcore => ../dbcore`). dbcore's declared
+      # module path does not match its real remote
+      # (github.com/Ben-guanzhi/dbcore), so the Go toolchain cannot fetch it as a
+      # normal dependency - nothing provides that sibling directory unless this
+      # step does. Without it every build/vet/test step fails with
+      # "replacement directory ../dbcore does not exist".
+      #
+      # Stopgap for CI only: see PUBLISH-BLOCKER-dbcore-module-path-2026-10-26.md
+      # at the workspace root for the permanent fix (rename the module path, then
+      # switch consumers from replace to a versioned require).
+      #
+      # Public repo: the clone below is anonymous. If dbcore is ever made
+      # private, set the DBCORE_CHECKOUT_TOKEN secret to a PAT with read access
+      # and nothing else changes.
+      - name: check out dbcore (sibling, for the local replace)
+        env:
+          # Left unset on purpose: the workflow token is scoped to THIS repo and
+          # cannot read a different one, so it is only sent when a PAT exists.
+          DBCORE_TOKEN: ${{ secrets.DBCORE_CHECKOUT_TOKEN }}
+        run: |
+          set -eu
+          dest="$(dirname "$GITHUB_WORKSPACE")/dbcore"
+          if [ -n "${DBCORE_TOKEN:-}" ]; then
+            hdr="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$DBCORE_TOKEN" | base64 -w0)"
+            git -c "http.extraheader=$hdr" clone --depth 1 https://github.com/Ben-guanzhi/dbcore.git "$dest"
+          else
+            git clone --depth 1 https://github.com/Ben-guanzhi/dbcore.git "$dest"
+          fi
+
+      # Pinned rather than read from go.mod: that file declares only a language
+      # floor (`go 1.25.0`), so setup-go would install 1.25.x, while the
+      # developers here build with Go 1.27.1. The two gofmt builds disagree on
+      # some composite-literal alignment, so a file `gofmt -w` fixes locally can
+      # still fail this job's gofmt step. Keep CI on the toolchain the tree was
+      # formatted with.
       - uses: actions/setup-go@v6
         with:
-          go-version-file: go.mod
+          go-version: '1.27.1'
 
       - name: gofmt
         run: |
