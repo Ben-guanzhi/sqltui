@@ -1,14 +1,22 @@
+// Package sqlserverbe connects to a SQL Server instance with a split
+// integration: dialing, statement routing, and execution go through the
+// dbcore kernel like every other engine, while the cross-database catalog
+// (sys.databases, INFORMATION_SCHEMA filtered by TABLE_CATALOG, three-part
+// table names) stays local — the kernel's catalog is scoped to the connected
+// database and has no cross-database browsing yet. The local queries run
+// through the kernel driver with bound parameters, so no values are ever
+// concatenated.
 package sqlserverbe
 
 import (
 	"context"
 	"fmt"
-	"net/url"
 	"strings"
-	"time"
 
-	"github.com/LinPr/sqltui/internal/data"
+	"github.com/dbcore/dbcore"
+
 	"github.com/LinPr/sqltui/internal/db"
+	"github.com/LinPr/sqltui/internal/db/core"
 )
 
 // Config holds the connection parameters for a SQL Server database.
@@ -38,207 +46,213 @@ func (c Config) Validate() error {
 	return nil
 }
 
-// Dsn renders the config as a driver connection string with URL-encoded
-// credentials so that special characters in passwords are handled safely.
-// TLS is disabled by default for compatibility with SQL Server instances
-// using older TLS versions not supported by Go.
-func (c Config) Dsn() string {
-	return fmt.Sprintf("sqlserver://%s:%s@%s:%s?database=%s&encrypt=disable",
-		url.QueryEscape(c.UserName), url.QueryEscape(c.Password),
-		c.Host, c.Port, url.QueryEscape(c.DbName))
+// ConnSpec renders the config as a kernel connection spec. TLS stays off
+// (SSLMode "disable"), preserving the pre-kernel DSN's encrypt=disable
+// default for servers with older TLS versions.
+func (c Config) ConnSpec() dbcore.ConnSpec {
+	return dbcore.ConnSpec{
+		Kind:           dbcore.KindMSSQL,
+		Host:           strings.TrimSpace(c.Host),
+		Port:           core.ParsePort(c.Port),
+		User:           c.UserName,
+		Password:       c.Password,
+		Database:       strings.TrimSpace(c.DbName),
+		SSLMode:        "disable",
+		ConnectTimeout: core.QueryTimeout,
+	}
 }
 
-// Backend adapts the SQL Server data-access layer to the db.Backend contract.
+// Backend adapts the kernel mssql driver to the db.Backend contract.
 type Backend struct {
-	db   *DB
-	host string
+	*core.Backend
+	drv dbcore.SQLDriver
 }
 
-var _ db.Backend = (*Backend)(nil)
-var _ db.TableTargeter = (*Backend)(nil)
+var (
+	_ db.Backend       = (*Backend)(nil)
+	_ db.TableTargeter = (*Backend)(nil)
+)
 
-// Connect opens a SQL Server connection, validates the config, pings the
-// server, and returns a ready-to-use Backend.
+// Connect opens a SQL Server connection through the kernel, validates the
+// config, pings the server, and returns a ready-to-use Backend.
 func Connect(cfg Config) (*Backend, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("sqlserver connect: invalid config: %w", err)
 	}
-	conn, err := NewDB(cfg.Dsn(), cfg.DbName)
+	drv, err := dbcore.Open(context.Background(), cfg.ConnSpec(), dbcore.PoolConfig{})
 	if err != nil {
 		return nil, fmt.Errorf("sqlserver connect: %w", err)
 	}
-	return &Backend{db: conn, host: cfg.Host}, nil
+	sqlDrv, ok := drv.AsSQL()
+	if !ok {
+		drv.Close()
+		return nil, fmt.Errorf("sqlserver: kernel driver is not an SQL driver")
+	}
+	return &Backend{
+		Backend: core.New(sqlDrv, core.Options{
+			Kind:    "sqlserver",
+			Title:   fmt.Sprintf("sqlserver://%s/%s", strings.TrimSpace(cfg.Host), strings.TrimSpace(cfg.DbName)),
+			Target:  Target,
+			CurrentNS: func(context.Context) string { return strings.TrimSpace(cfg.DbName) },
+		}),
+		drv: sqlDrv,
+	}, nil
 }
 
-// Kind returns the engine identifier used for keyword autocompletion.
-func (b *Backend) Kind() string { return "sqlserver" }
-
-// Title returns a human-readable connection title for the UI header.
-func (b *Backend) Title() string {
-	if b.db == nil {
-		return "sqlserver://(disconnected)"
-	}
-	return fmt.Sprintf("sqlserver://%s/%s", b.host, b.db.dbName)
-}
-
-// Run executes a statement, routing queries vs. mutations. Query results
-// come back as a typed data.Frame; mutations return an ExecResult with
-// RowsAffected.
-func (b *Backend) Run(stmt string) (db.Result, error) {
-	words := strings.Fields(strings.TrimSpace(stmt))
-	if len(words) == 0 {
-		return db.Result{}, fmt.Errorf("empty query")
-	}
-
-	isDQL := false
-	switch strings.ToLower(words[0]) {
-	case SELECT, WITH, EXPLAIN, SHOW, TABLE, VALUES:
-		isDQL = true
-	case "desc", "describe":
-		isDQL = true
-	default:
-		switch {
-		case strings.HasPrefix(words[0], "("):
-			isDQL = true
-		default:
-			isDQL = db.HasReturningClause(stmt)
-		}
-	}
-
-	if isDQL {
-		frame, err := b.queryFrame(stmt)
-		if err != nil {
-			return db.Result{}, fmt.Errorf("sqlserver query: %w", err)
-		}
-		return db.Result{Frame: frame}, nil
-	}
-
-	res, err := b.db.RawExec(stmt)
-	if err != nil {
-		return db.Result{}, fmt.Errorf("sqlserver exec: %w", err)
-	}
-	exec := &db.ExecResult{HasLastInsert: false}
-	if res != nil {
-		if n, err := res.RowsAffected(); err == nil {
-			exec.RowsAffected = n
-		}
-	}
-	return db.Result{Exec: exec}, nil
-}
-
-// Namespaces lists the databases on the server.
-func (b *Backend) Namespaces() ([]string, error) {
-	return b.db.ShowDatabases()
-}
-
-// CurrentNamespace reports the database this connection was opened against.
-func (b *Backend) CurrentNamespace() string {
-	if b.db == nil {
-		return ""
-	}
-	return b.db.dbName
-}
-
-// Tables lists the tables of one database.
-func (b *Backend) Tables(namespace string) ([]string, error) {
-	return b.db.ShowDatabaseTables(namespace)
-}
-
-// TableTarget spells namespace.table as [ns].dbo.[tbl] (SQL Server requires
+// Target spells namespace.table as [ns].dbo.[tbl] (SQL Server wants
 // three-part naming, so a non-empty namespace defaults to the dbo schema);
 // an empty namespace yields just [tbl].
-func (b *Backend) TableTarget(namespace, table string) string {
-	ident := db.QuoteIdentBracket(table)
+func Target(namespace, table string) string {
+	ident := core.QuoteIdent("mssql", table)
 	if namespace != "" {
-		ident = db.QuoteIdentBracket(namespace) + ".dbo." + ident
+		return core.QuoteIdent("mssql", namespace) + ".dbo." + ident
 	}
 	return ident
 }
 
-// FetchTable loads up to limit rows of namespace.table, preserving native
-// Go types for accurate display. SQL Server requires three-part naming:
-// [database].[schema].[table], so we default to the dbo schema.
-func (b *Backend) FetchTable(namespace, table string, limit int) (*data.Frame, error) {
-	if limit <= 0 {
-		limit = 1
-	} else if limit > 10000 {
-		limit = 10000
+// Namespaces lists the databases on the server (cross-database browsing; the
+// kernel only lists schemas of the connected database).
+func (b *Backend) Namespaces() ([]string, error) {
+	res, err := b.query("SELECT name FROM sys.databases ORDER BY name")
+	if err != nil {
+		return nil, err
 	}
-	query := fmt.Sprintf("SELECT TOP %d * FROM %s", limit, b.TableTarget(namespace, table))
-	return b.queryFrame(query)
+	out := make([]string, 0, len(res.Rows))
+	for _, r := range res.Rows {
+		if len(r) > 0 {
+			out = append(out, r[0].S)
+		}
+	}
+	return out, nil
 }
 
-// PrimaryKeys lists the primary-key column names of namespace.table.
+// Tables lists the base tables of one database via the TABLE_CATALOG-filtered
+// catalog view; an empty namespace falls back to the connected database (the
+// pre-kernel code built an invalid `[].INFORMATION_SCHEMA…` reference then).
+func (b *Backend) Tables(namespace string) ([]string, error) {
+	query := `SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+		WHERE TABLE_TYPE = 'BASE TABLE'`
+	args := []dbcore.Value{}
+	if namespace != "" {
+		query += ` AND TABLE_CATALOG = @p1`
+		args = append(args, textArg(namespace))
+	}
+	res, err := b.query(query+" ORDER BY TABLE_NAME", args...)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(res.Rows))
+	for _, r := range res.Rows {
+		if len(r) > 0 {
+			out = append(out, r[0].S)
+		}
+	}
+	return out, nil
+}
+
+// PrimaryKeys lists the primary-key column names of database.table in
+// key-ordinal order, across the named database (empty = current database).
 func (b *Backend) PrimaryKeys(namespace, table string) ([]string, error) {
-	return b.db.PrimaryKeys(namespace, table)
+	query := `SELECT COLUMN_NAME
+		FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE
+		WHERE OBJECTPROPERTY(OBJECT_ID(TABLE_CATALOG + '.' + TABLE_SCHEMA + '.' + TABLE_NAME), 'IsPrimaryKey') = 1
+		AND TABLE_NAME = @p1`
+	args := []dbcore.Value{textArg(table)}
+	if namespace != "" {
+		query += ` AND TABLE_CATALOG = @p2`
+		args = append(args, textArg(namespace))
+	}
+	res, err := b.query(query+" ORDER BY ORDINAL_POSITION", args...)
+	if err != nil {
+		return nil, err
+	}
+	pks := make([]string, 0, len(res.Rows))
+	for _, r := range res.Rows {
+		if len(r) > 0 {
+			pks = append(pks, r[0].S)
+		}
+	}
+	return pks, nil
 }
 
-// ColumnsMeta returns column metadata for namespace.table.
+// ColumnsMeta returns column metadata for database.table in ordinal order,
+// across the named database (empty = current database).
 func (b *Backend) ColumnsMeta(namespace, table string) ([]db.ColumnMeta, error) {
-	return b.db.ColumnsMeta(namespace, table)
+	query := `SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE, COLUMN_DEFAULT
+		FROM INFORMATION_SCHEMA.COLUMNS
+		WHERE TABLE_NAME = @p1`
+	args := []dbcore.Value{textArg(table)}
+	if namespace != "" {
+		query += ` AND TABLE_CATALOG = @p2`
+		args = append(args, textArg(namespace))
+	}
+	res, err := b.query(query+" ORDER BY ORDINAL_POSITION", args...)
+	if err != nil {
+		return nil, err
+	}
+	cols := make([]db.ColumnMeta, 0, len(res.Rows))
+	for _, r := range res.Rows {
+		if len(r) < 4 {
+			continue
+		}
+		c := db.ColumnMeta{Name: r[0].S, DataType: r[1].S, IsNullable: r[2].S}
+		if s, ok := dbcore.TryGetString(r[3]); ok {
+			c.Default = s
+		}
+		cols = append(cols, c)
+	}
+	return cols, nil
 }
 
-// ColumnIndexTypes returns index type labels for indexed columns.
+// ColumnIndexTypes returns a column→index-type map for database.table.
+// Priority: PK > UNIQUE > INDEX. (The pre-kernel query ordered by
+// is_primary_key but never labeled PK, so primary-key columns showed up as
+// UNIQUE; this one reads the flag.)
 func (b *Backend) ColumnIndexTypes(namespace, table string) (map[string]string, error) {
-	return b.db.ColumnIndexTypes(namespace, table)
+	res, err := b.query(`SELECT
+		i.name AS index_name,
+		COL_NAME(ic.object_id, ic.column_id) AS column_name,
+		i.is_unique,
+		i.is_primary_key
+		FROM sys.indexes i
+		INNER JOIN sys.index_columns ic ON i.object_id = ic.object_id AND i.index_id = ic.index_id
+		WHERE i.object_id = OBJECT_ID(@p1 + '.dbo.' + @p2)
+		AND i.type > 0
+		ORDER BY CASE WHEN i.is_primary_key = 1 THEN 0 WHEN i.is_unique = 1 THEN 1 ELSE 2 END`,
+		textArg(namespace), textArg(table))
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[string]string)
+	for _, r := range res.Rows {
+		if len(r) < 4 {
+			continue
+		}
+		colName := r[1].S
+		label := "INDEX"
+		if r[3].I == 1 {
+			label = "PK"
+		} else if r[2].I == 1 {
+			label = "UNIQUE"
+		}
+		if existing, ok := result[colName]; !ok || db.IndexPriority(existing) < db.IndexPriority(label) {
+			result[colName] = label
+		}
+	}
+	return result, nil
 }
 
-// Close releases the underlying database connection.
-func (b *Backend) Close() error {
-	return b.db.Close()
-}
+// FetchTable, Run, TableTarget, quoting, and Close are inherited from the
+// core adapter: TOP limiting and statement routing come from the kernel;
+// only the [db].dbo.[table] target spelling is engine-local.
 
-// queryFrame runs a query and scans the result set into a frame, preserving
-// native Go types (int64, float64, bool, time.Time, string, nil) instead of
-// converting everything to strings.
-func (b *Backend) queryFrame(query string) (*data.Frame, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), QueryTimeout)
+func (b *Backend) query(sql string, args ...dbcore.Value) (*dbcore.QueryResult, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), core.QueryTimeout)
 	defer cancel()
-
-	rows, err := b.db.QueryContext(ctx, query)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	fields, err := rows.Columns()
-	if err != nil {
-		return nil, err
-	}
-
-	frame := data.New(fields...)
-	for rows.Next() {
-		values := make([]any, len(fields))
-		for i := range values {
-			values[i] = new(any)
-		}
-		if err := rows.Scan(values...); err != nil {
-			return nil, err
-		}
-		row := make([]any, len(fields))
-		for i, value := range values {
-			row[i] = cellValue(*(value.(*any)))
-		}
-		frame.AppendRow(row)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return frame, nil
+	return b.drv.Execute(ctx, sql, args...)
 }
 
-// cellValue converts a raw driver value into a display-friendly Go type.
-func cellValue(value any) any {
-	switch v := value.(type) {
-	case nil:
-		return nil
-	case []byte:
-		return string(v)
-	case time.Time:
-		return v
-	case string, int64, float64, bool:
-		return v
-	default:
-		return fmt.Sprintf("%v", v)
-	}
+// textArg wraps s as a bound kernel parameter.
+func textArg(s string) dbcore.Value {
+	return dbcore.Value{Kind: dbcore.ValText, S: s}
 }

@@ -1,10 +1,21 @@
+// Package sqlitebe opens SQLite database files through the dbcore kernel:
+// the kernel owns the connection, statement routing, and every catalog query;
+// this wrapper only carries the UI presentation semantics. (The file loader
+// in internal/reader stays kernel-free by design: it is a reader, not a
+// client.)
 package sqlitebe
 
 import (
+	"context"
 	"fmt"
+	"os"
+	"strings"
 
-	"github.com/LinPr/sqltui/internal/data"
+	"github.com/dbcore/dbcore"
+	_ "github.com/dbcore/dbcore/sqlite" // registers the sqlite factory
+
 	"github.com/LinPr/sqltui/internal/db"
+	"github.com/LinPr/sqltui/internal/db/core"
 )
 
 // Config holds the connection parameters for a sqlite database file.
@@ -12,99 +23,49 @@ type Config struct {
 	FilePath string
 }
 
-// Backend adapts the sqlite data-access layer to the db.Backend contract.
+// Backend adapts the kernel sqlite driver to the db.Backend contract.
 type Backend struct {
-	db *DB
+	*core.Backend
 }
 
-var _ db.Backend = (*Backend)(nil)
-var _ db.TableTargeter = (*Backend)(nil)
+var (
+	_ db.Backend       = (*Backend)(nil)
+	_ db.TableTargeter = (*Backend)(nil)
+)
 
-// Connect opens the sqlite file and pings it before returning. The file
-// must already exist.
+// Connect opens the sqlite file through the kernel and pings it before
+// returning. The file must already exist: silently creating one from a typo
+// in the path used to strand users in an empty database.
 func Connect(cfg Config) (*Backend, error) {
-	conn, err := NewDB(cfg.FilePath)
+	file := strings.TrimSpace(cfg.FilePath)
+	if file == "" {
+		return nil, fmt.Errorf("sqlite file path is empty")
+	}
+	if _, err := os.Stat(file); err != nil {
+		return nil, err
+	}
+	drv, err := dbcore.Open(context.Background(), dbcore.ConnSpec{
+		Kind: dbcore.KindSQLite,
+		File: file,
+	}, dbcore.PoolConfig{})
 	if err != nil {
 		return nil, err
 	}
-	return &Backend{db: conn}, nil
-}
-
-func (b *Backend) Kind() string { return "sqlite" }
-
-func (b *Backend) Title() string {
-	return "sqlite://" + b.db.File
-}
-
-// Run executes a statement, routing queries vs. mutations the same way the
-// underlying data-access layer does. Query results come back as an
-// all-string frame.
-func (b *Backend) Run(stmt string) (db.Result, error) {
-	raw, err := b.db.RawSqlCommand(stmt)
-	if err != nil {
-		return db.Result{}, err
+	sql, ok := drv.AsSQL()
+	if !ok {
+		drv.Close()
+		return nil, fmt.Errorf("sqlite: kernel driver is not an SQL driver")
 	}
-	if raw.IsDQL {
-		return db.Result{Frame: db.StringFrame(raw.Fields, raw.Records)}, nil
-	}
-
-	exec := &db.ExecResult{HasLastInsert: true}
-	if raw.Result != nil {
-		if n, err := raw.Result.RowsAffected(); err == nil {
-			exec.RowsAffected = n
-		}
-		if id, err := raw.Result.LastInsertId(); err == nil {
-			exec.LastInsertID = id
-		}
-	}
-	return db.Result{Exec: exec}, nil
+	return &Backend{Backend: core.New(sql, core.Options{
+		Kind:            "sqlite",
+		Title:           "sqlite://" + file,
+		Target:          Target,
+		HasLastInsertID: true,
+	})}, nil
 }
 
-// Namespaces returns a single empty namespace: sqlite files have no
-// database/schema level.
-func (b *Backend) Namespaces() ([]string, error) {
-	return []string{""}, nil
-}
-
-// Tables lists all user tables; the namespace argument is ignored.
-func (b *Backend) Tables(string) ([]string, error) {
-	return b.db.ListTables()
-}
-
-// TableTarget spells the table as "tbl" (double-quoted, escaped); SQLite
-// has no namespaces, so the namespace argument is ignored.
-func (b *Backend) TableTarget(_ string, table string) string {
-	return db.QuoteIdentDouble(table)
-}
-
-// FetchTable loads up to limit rows of a table; the namespace argument is
-// ignored.
-func (b *Backend) FetchTable(_ string, table string, limit int) (*data.Frame, error) {
-	query := fmt.Sprintf("select * from %s limit %d", b.TableTarget("", table), limit)
-	fields, records, err := b.db.RawQuery(query)
-	if err != nil {
-		return nil, err
-	}
-	return db.StringFrame(fields, records), nil
-}
-
-// PrimaryKeys lists the primary-key column names of a table; the namespace
-// argument is ignored.
-func (b *Backend) PrimaryKeys(_ string, table string) ([]string, error) {
-	return b.db.ListPrimaryKeys(table)
-}
-
-// ColumnsMeta returns column metadata for a table; the namespace argument is
-// ignored.
-func (b *Backend) ColumnsMeta(_ string, table string) ([]db.ColumnMeta, error) {
-	return b.db.ColumnsMeta(table)
-}
-
-// ColumnIndexTypes returns index type labels for indexed columns; namespace is ignored.
-func (b *Backend) ColumnIndexTypes(_ string, table string) (map[string]string, error) {
-	return b.db.ColumnIndexTypes(table)
-}
-
-func (b *Backend) Close() error {
-	return b.db.Close()
+// Target spells the table as "tbl" (kernel-quoted); SQLite files have no
+// schema level, so the namespace argument is ignored.
+func Target(_, table string) string {
+	return core.QuoteIdent("sqlite", table)
 }

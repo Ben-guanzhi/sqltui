@@ -1,12 +1,20 @@
+// Package postgresbe connects to a PostgreSQL server through the dbcore
+// kernel: the kernel owns the DSN, the connection (pooled *sql.DB rather than
+// the old single pgx.Conn), statement routing, and every catalog query; this
+// wrapper only carries the UI presentation semantics.
 package postgresbe
 
 import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
-	"github.com/LinPr/sqltui/internal/data"
+	"github.com/dbcore/dbcore"
+	_ "github.com/dbcore/dbcore/postgres" // registers the postgres factory
+
 	"github.com/LinPr/sqltui/internal/db"
+	"github.com/LinPr/sqltui/internal/db/core"
 )
 
 // Config holds the connection parameters for a PostgreSQL server.
@@ -19,127 +27,69 @@ type Config struct {
 	SslMode  string
 }
 
-// Dsn renders the config as a driver connection string:
-// postgres://user:pass@host:port/dbname?sslmode=<sslmode>
-func (c Config) Dsn() string {
-	return BuildDsn(c.UserName, c.Password, c.Host, c.Port, c.DbName, c.SslMode)
+// ConnectTimeout bounds the initial dial (the same value every sqltui backend
+// used before the kernel migration).
+const ConnectTimeout = 10 * time.Second
+
+// ConnSpec renders the config as a kernel connection spec. An empty SslMode
+// becomes "disable", matching the pre-kernel DSN builder; the kernel maps the
+// portability spellings onto libpq's own.
+func (c Config) ConnSpec() dbcore.ConnSpec {
+	ssl := strings.TrimSpace(c.SslMode)
+	if ssl == "" {
+		ssl = "disable"
+	}
+	return dbcore.ConnSpec{
+		Kind:           dbcore.KindPostgres,
+		Host:           strings.TrimSpace(c.Host),
+		Port:           core.ParsePort(c.Port),
+		User:           c.UserName,
+		Password:       c.Password,
+		Database:       strings.TrimSpace(c.DbName),
+		SSLMode:        ssl,
+		ConnectTimeout: ConnectTimeout,
+	}
 }
 
-// Backend adapts the postgres data-access layer to the db.Backend contract.
+// Backend adapts the kernel postgres driver to the db.Backend contract.
 type Backend struct {
-	db   *DB
-	host string
+	*core.Backend
 }
 
-var _ db.Backend = (*Backend)(nil)
-var _ db.TableTargeter = (*Backend)(nil)
+var (
+	_ db.Backend       = (*Backend)(nil)
+	_ db.TableTargeter = (*Backend)(nil)
+)
 
-// Connect opens a postgres connection and pings it before returning.
+// Connect opens a postgres connection through the kernel and pings it before
+// returning.
 func Connect(cfg Config) (*Backend, error) {
-	conn, err := NewDB(cfg.Dsn(), cfg.DbName)
+	drv, err := dbcore.Open(context.Background(), cfg.ConnSpec(), dbcore.PoolConfig{})
 	if err != nil {
 		return nil, err
 	}
-	return &Backend{db: conn, host: cfg.Host}, nil
-}
-
-func (b *Backend) Kind() string { return "postgres" }
-
-func (b *Backend) Title() string {
-	if b.db == nil || b.db.dbName == "" {
-		return "postgres"
+	sql, ok := drv.AsSQL()
+	if !ok {
+		drv.Close()
+		return nil, fmt.Errorf("postgres: kernel driver is not an SQL driver")
 	}
-	return fmt.Sprintf("postgres://%s/%s", b.host, b.db.dbName)
+	return &Backend{Backend: core.New(sql, core.Options{
+		Kind:  "postgres",
+		Title: fmt.Sprintf("postgres://%s/%s", strings.TrimSpace(cfg.Host), strings.TrimSpace(cfg.DbName)),
+		Target: Target,
+		// The browser scopes its listing to the schema new objects resolve to
+		// (usually "public"); the query keeps working after ALTER ROLE ... SET
+		// search_path, unlike a hard-coded name.
+		CurrentNS: core.CurrentNSQuery(sql, "SELECT current_schema()"),
+	})}, nil
 }
 
-// Run executes a statement with the same DQL / RETURNING routing as the
-// underlying data-access layer. Query results come back as an all-string
-// frame via the StringFrame path.
-func (b *Backend) Run(stmt string) (db.Result, error) {
-	words := strings.Fields(strings.TrimSpace(stmt))
-	if len(words) == 0 {
-		return db.Result{}, fmt.Errorf("empty query")
+// Target spells namespace.table as "ns"."tbl" with kernel-quoted parts; an
+// empty namespace yields just "tbl", which resolves on the search path.
+func Target(namespace, table string) string {
+	tbl := core.QuoteIdent("postgres", table)
+	if namespace != "" {
+		return core.QuoteIdent("postgres", namespace) + "." + tbl
 	}
-
-	isDQL := false
-	switch strings.ToLower(words[0]) {
-	case SELECT, WITH, SHOW, EXPLAIN, VALUES, TABLE:
-		isDQL = true
-	default:
-		isDQL = db.HasReturningClause(stmt)
-	}
-
-	if isDQL {
-		fields, records, err := b.db.RawQuery(stmt)
-		if err != nil {
-			return db.Result{}, err
-		}
-		return db.Result{Frame: db.StringFrame(fields, records)}, nil
-	}
-
-	tag, err := b.db.RawExec(stmt)
-	if err != nil {
-		return db.Result{}, err
-	}
-	exec := &db.ExecResult{HasLastInsert: false}
-	exec.RowsAffected = int64(tag.RowsAffected())
-	return db.Result{Exec: exec}, nil
-}
-
-// Namespaces lists the user schemas of the database.
-func (b *Backend) Namespaces() ([]string, error) {
-	return b.db.ListSchemas()
-}
-
-// CurrentNamespace reports the schema new objects resolve to on this
-// connection (usually "public"), so browsers can scope their listing to it.
-func (b *Backend) CurrentNamespace() string {
-	if b.db != nil && b.db.conn != nil {
-		var schema string
-		err := b.db.conn.QueryRow(context.Background(), "SELECT current_schema()").Scan(&schema)
-		if err == nil && schema != "" {
-			return schema
-		}
-	}
-	return "public"
-}
-
-// Tables lists the tables of one schema.
-func (b *Backend) Tables(namespace string) ([]string, error) {
-	return b.db.ListTables(namespace)
-}
-
-// TableTarget spells namespace.table as "ns"."tbl" with double-quoted,
-// escaped parts.
-func (b *Backend) TableTarget(namespace, table string) string {
-	return db.QuoteIdentDouble(namespace) + "." + db.QuoteIdentDouble(table)
-}
-
-// FetchTable loads up to limit rows of namespace.table.
-func (b *Backend) FetchTable(namespace, table string, limit int) (*data.Frame, error) {
-	query := fmt.Sprintf("SELECT * FROM %s LIMIT %d", b.TableTarget(namespace, table), limit)
-	fields, records, err := b.db.RawQuery(query)
-	if err != nil {
-		return nil, err
-	}
-	return db.StringFrame(fields, records), nil
-}
-
-// PrimaryKeys lists the primary-key column names of namespace.table.
-func (b *Backend) PrimaryKeys(namespace, table string) ([]string, error) {
-	return b.db.ListPrimaryKeys(namespace, table)
-}
-
-// ColumnsMeta returns column metadata for namespace.table.
-func (b *Backend) ColumnsMeta(namespace, table string) ([]db.ColumnMeta, error) {
-	return b.db.ColumnsMeta(namespace, table)
-}
-
-// ColumnIndexTypes returns index type labels for indexed columns of namespace.table.
-func (b *Backend) ColumnIndexTypes(namespace, table string) (map[string]string, error) {
-	return b.db.ColumnIndexTypes(namespace, table)
-}
-
-func (b *Backend) Close() error {
-	return b.db.Close()
+	return tbl
 }

@@ -1,203 +1,72 @@
 package sqlserverbe
 
 import (
+	"strings"
 	"testing"
 
-	"github.com/LinPr/sqltui/internal/db"
+	"github.com/dbcore/dbcore"
+	dbcoremssql "github.com/dbcore/dbcore/mssql"
 )
 
-func TestConfigDsn(t *testing.T) {
-	cfg := Config{
-		UserName: "sa",
-		Password: "password123",
-		Host:     "localhost",
-		Port:     "1433",
-		DbName:   "testdb",
+func TestConnSpec(t *testing.T) {
+	spec := Config{UserName: "sa", Password: "pw", Host: "127.0.0.1", Port: "1433", DbName: "master"}.ConnSpec()
+	if spec.Kind != dbcore.KindMSSQL || spec.Host != "127.0.0.1" || spec.Port != 1433 ||
+		spec.User != "sa" || spec.Password != "pw" || spec.Database != "master" {
+		t.Fatalf("ConnSpec = %+v", spec)
 	}
-	dsn := cfg.Dsn()
-	expected := "sqlserver://sa:password123@localhost:1433?database=testdb&encrypt=disable"
-	if dsn != expected {
-		t.Errorf("Dsn() = %q, want %q", dsn, expected)
+	if spec.SSLMode != "disable" {
+		t.Fatalf("SSLMode = %q, want disable (encrypt=disable parity)", spec.SSLMode)
 	}
 }
 
-func TestConfigDsnWithSpecialChars(t *testing.T) {
-	cfg := Config{
-		UserName: "sa",
-		Password: "p@ss:word/123",
-		Host:     "localhost",
-		Port:     "1433",
-		DbName:   "test db",
+// The kernel DSN must keep encryption off: sqltui historically connected with
+// encrypt=disable for servers running older TLS versions.
+func TestConnSpecDsnKeepsEncryptionOff(t *testing.T) {
+	dsn := dbcoremssql.DSN(Config{UserName: "sa", Password: "p@ss", Host: "127.0.0.1", Port: "1433", DbName: "master"}.ConnSpec())
+	if !strings.Contains(dsn, "encrypt=false") {
+		t.Fatalf("DSN lost encrypt=false: %s", dsn)
 	}
-	dsn := cfg.Dsn()
-	// Password should be URL encoded
-	expected := "sqlserver://sa:p%40ss%3Aword%2F123@localhost:1433?database=test+db&encrypt=disable"
-	if dsn != expected {
-		t.Errorf("Dsn() = %q, want %q", dsn, expected)
+	if !strings.Contains(dsn, "database=master") {
+		t.Fatalf("DSN lost database param: %s", dsn)
 	}
 }
 
 func TestConfigValidate(t *testing.T) {
 	tests := []struct {
-		name    string
-		config  Config
-		wantErr bool
+		name string
+		cfg  Config
+		want string
 	}{
-		{
-			name: "valid config",
-			config: Config{
-				UserName: "sa",
-				Password: "password123",
-				Host:     "localhost",
-				Port:     "1433",
-				DbName:   "testdb",
-			},
-			wantErr: false,
-		},
-		{
-			name: "missing host",
-			config: Config{
-				UserName: "sa",
-				Password: "password123",
-				Port:     "1433",
-				DbName:   "testdb",
-			},
-			wantErr: true,
-		},
-		{
-			name: "missing port",
-			config: Config{
-				UserName: "sa",
-				Password: "password123",
-				Host:     "localhost",
-				DbName:   "testdb",
-			},
-			wantErr: true,
-		},
-		{
-			name: "missing username",
-			config: Config{
-				Password: "password123",
-				Host:     "localhost",
-				Port:     "1433",
-				DbName:   "testdb",
-			},
-			wantErr: true,
-		},
-		{
-			name: "missing database name",
-			config: Config{
-				UserName: "sa",
-				Password: "password123",
-				Host:     "localhost",
-				Port:     "1433",
-			},
-			wantErr: true,
-		},
+		{"valid", Config{Host: "h", Port: "1433", UserName: "sa", DbName: "d"}, ""},
+		{"missing host", Config{Port: "1433", UserName: "sa", DbName: "d"}, "host is required"},
+		{"missing port", Config{Host: "h", UserName: "sa", DbName: "d"}, "port is required"},
+		{"missing user", Config{Host: "h", Port: "1433", DbName: "d"}, "username is required"},
+		{"missing db", Config{Host: "h", Port: "1433", UserName: "sa"}, "database name is required"},
 	}
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := tt.config.Validate()
-			if (err != nil) != tt.wantErr {
-				t.Errorf("Validate() error = %v, wantErr %v", err, tt.wantErr)
+			err := tt.cfg.Validate()
+			if tt.want == "" {
+				if err != nil {
+					t.Fatalf("Validate() = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil || err.Error() != tt.want {
+				t.Fatalf("Validate() = %v, want %q", err, tt.want)
 			}
 		})
 	}
 }
 
-func TestQuoteIdent(t *testing.T) {
-	tests := []struct {
-		input    string
-		expected string
-	}{
-		{"users", "[users]"},
-		{"my table", "[my table]"},
-		{"col]name", "[col]]name]"},
-		{"schema.table", "[schema.table]"},
+func TestTarget(t *testing.T) {
+	if got := Target("sales", "orders"); got != "[sales].dbo.[orders]" {
+		t.Errorf("qualified = %s, want [sales].dbo.[orders]", got)
 	}
-	for _, tt := range tests {
-		got := db.QuoteIdentBracket(tt.input)
-		if got != tt.expected {
-			t.Errorf("QuoteIdentBracket(%q) = %q, want %q", tt.input, got, tt.expected)
-		}
-	}
-}
-
-func TestIndexPriority(t *testing.T) {
-	tests := []struct {
-		label    string
-		expected int
-	}{
-		{"PK", 3},
-		{"UNIQUE", 2},
-		{"INDEX", 1},
-		{"UNKNOWN", 0},
-	}
-	for _, tt := range tests {
-		got := db.IndexPriority(tt.label)
-		if got != tt.expected {
-			t.Errorf("IndexPriority(%q) = %d, want %d", tt.label, got, tt.expected)
-		}
-	}
-}
-
-func TestFormatValue(t *testing.T) {
-	tests := []struct {
-		input    interface{}
-		expected string
-	}{
-		{nil, "NULL"},
-		{[]byte("hello"), "hello"},
-		{"test", "test"},
-		{int64(42), "42"},
-		{float64(3.14), "3.14"},
-		{true, "true"},
-	}
-	for _, tt := range tests {
-		got := db.FormatNativeCell(tt.input)
-		if got != tt.expected {
-			t.Errorf("FormatNativeCell(%v) = %q, want %q", tt.input, got, tt.expected)
-		}
-	}
-}
-
-func TestBackendKind(t *testing.T) {
-	b := &Backend{host: "localhost", db: &DB{dbName: "testdb"}}
-	if got := b.Kind(); got != "sqlserver" {
-		t.Errorf("Kind() = %q, want %q", got, "sqlserver")
-	}
-}
-
-func TestBackendTitle(t *testing.T) {
-	b := &Backend{host: "localhost", db: &DB{dbName: "testdb"}}
-	expected := "sqlserver://localhost/testdb"
-	if got := b.Title(); got != expected {
-		t.Errorf("Title() = %q, want %q", got, expected)
-	}
-}
-
-func TestBackendCurrentNamespace(t *testing.T) {
-	b := &Backend{db: &DB{dbName: "testdb"}}
-	if got := b.CurrentNamespace(); got != "testdb" {
-		t.Errorf("CurrentNamespace() = %q, want %q", got, "testdb")
-	}
-
-	b2 := &Backend{db: nil}
-	if got := b2.CurrentNamespace(); got != "" {
-		t.Errorf("CurrentNamespace() with nil db = %q, want empty", got)
-	}
-}
-
-func TestTableTarget(t *testing.T) {
-	b := &Backend{}
-	if got := b.TableTarget("shop", "orders"); got != "[shop].dbo.[orders]" {
-		t.Errorf("qualified = %s, want [shop].dbo.[orders]", got)
-	}
-	if got := b.TableTarget("", "orders"); got != "[orders]" {
+	if got := Target("", "orders"); got != "[orders]" {
 		t.Errorf("bare = %s, want [orders]", got)
 	}
-	if got := b.TableTarget("shop", "we]ird"); got != "[shop].dbo.[we]]ird]" {
+	if got := Target("s", "od]d"); got != "[s].dbo.[od]]d]" {
 		t.Errorf("escaped = %s, want bracket-doubled", got)
 	}
 }

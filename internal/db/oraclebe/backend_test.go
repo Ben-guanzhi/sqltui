@@ -1,200 +1,73 @@
 package oraclebe
 
 import (
+	"strings"
 	"testing"
 
-	"github.com/LinPr/sqltui/internal/db"
+	"github.com/dbcore/dbcore"
+	dbcoreoracle "github.com/dbcore/dbcore/oracle"
 )
 
-func TestConfigDsn(t *testing.T) {
-	cfg := Config{
-		UserName: "system",
-		Password: "password123",
-		Host:     "localhost",
-		Port:     "1521",
-		DbName:   "xe",
+func TestConnSpec(t *testing.T) {
+	spec := Config{UserName: "system", Password: "password123", Host: "localhost", Port: "1521", DbName: "xe"}.ConnSpec()
+	if spec.Kind != dbcore.KindOracle || spec.Host != "localhost" || spec.Port != 1521 ||
+		spec.User != "system" || spec.Password != "password123" || spec.Database != "xe" {
+		t.Fatalf("ConnSpec = %+v", spec)
 	}
-	dsn := cfg.Dsn()
-	expected := "oracle://system:password123@localhost:1521/xe"
-	if dsn != expected {
-		t.Errorf("Dsn() = %q, want %q", dsn, expected)
+	if spec.ConnectTimeout <= 0 {
+		t.Fatal("ConnectTimeout must bound the dial")
 	}
 }
 
-func TestConfigDsnWithSpecialChars(t *testing.T) {
-	cfg := Config{
-		UserName: "system",
-		Password: "p@ss:word/123",
-		Host:     "localhost",
-		Port:     "1521",
-		DbName:   "test/service",
+// Special characters in the password must survive the kernel DSN (net/url
+// escapes them; the old hand-rolled DSN used QueryEscape the same way).
+func TestConnSpecDsnEscapesCredentials(t *testing.T) {
+	spec := Config{UserName: "system", Password: "p@ss:word/123", Host: "localhost", Port: "1521", DbName: "test/service"}.ConnSpec()
+	dsn := dbcoreoracle.DSN(spec)
+	if !strings.Contains(dsn, "p%40ss%3Aword%2F123") {
+		t.Fatalf("password not escaped in DSN: %s", dsn)
 	}
-	dsn := cfg.Dsn()
-	// Password and DbName should be URL encoded
-	expected := "oracle://system:p%40ss%3Aword%2F123@localhost:1521/test%2Fservice"
-	if dsn != expected {
-		t.Errorf("Dsn() = %q, want %q", dsn, expected)
+	if !strings.Contains(dsn, "@localhost:1521/") {
+		t.Fatalf("unexpected host spelling in DSN: %s", dsn)
 	}
 }
 
 func TestConfigValidate(t *testing.T) {
 	tests := []struct {
-		name    string
-		config  Config
-		wantErr bool
+		name string
+		cfg  Config
+		want string
 	}{
-		{
-			name: "valid config",
-			config: Config{
-				UserName: "system",
-				Password: "password123",
-				Host:     "localhost",
-				Port:     "1521",
-				DbName:   "xe",
-			},
-			wantErr: false,
-		},
-		{
-			name: "missing host",
-			config: Config{
-				UserName: "system",
-				Password: "password123",
-				Port:     "1521",
-				DbName:   "xe",
-			},
-			wantErr: true,
-		},
-		{
-			name: "missing port",
-			config: Config{
-				UserName: "system",
-				Password: "password123",
-				Host:     "localhost",
-				DbName:   "xe",
-			},
-			wantErr: true,
-		},
-		{
-			name: "missing username",
-			config: Config{
-				Password: "password123",
-				Host:     "localhost",
-				Port:     "1521",
-				DbName:   "xe",
-			},
-			wantErr: true,
-		},
-		{
-			name: "missing database name",
-			config: Config{
-				UserName: "system",
-				Password: "password123",
-				Host:     "localhost",
-				Port:     "1521",
-			},
-			wantErr: true,
-		},
+		{"valid", Config{Host: "localhost", Port: "1521", UserName: "system", DbName: "xe"}, ""},
+		{"missing host", Config{Port: "1521", UserName: "system", DbName: "xe"}, "host is required"},
+		{"missing port", Config{Host: "localhost", UserName: "system", DbName: "xe"}, "port is required"},
+		{"missing user", Config{Host: "localhost", Port: "1521", DbName: "xe"}, "username is required"},
+		{"missing db", Config{Host: "localhost", Port: "1521", UserName: "system"}, "database name is required"},
 	}
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := tt.config.Validate()
-			if (err != nil) != tt.wantErr {
-				t.Errorf("Validate() error = %v, wantErr %v", err, tt.wantErr)
+			err := tt.cfg.Validate()
+			if tt.want == "" {
+				if err != nil {
+					t.Fatalf("Validate() = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil || err.Error() != tt.want {
+				t.Fatalf("Validate() = %v, want %q", err, tt.want)
 			}
 		})
 	}
 }
 
-func TestQuoteIdent(t *testing.T) {
-	tests := []struct {
-		input    string
-		expected string
-	}{
-		{"users", "\"users\""},
-		{"my table", "\"my table\""},
-		{"col\"name", "\"col\"\"name\""},
-		{"SCHEMA.TABLE", "\"SCHEMA.TABLE\""},
+func TestTarget(t *testing.T) {
+	if got := Target("HR", "EMPLOYEES"); got != `"HR"."EMPLOYEES"` {
+		t.Errorf("qualified = %s", got)
 	}
-	for _, tt := range tests {
-		got := db.QuoteIdentDouble(tt.input)
-		if got != tt.expected {
-			t.Errorf("QuoteIdentDouble(%q) = %q, want %q", tt.input, got, tt.expected)
-		}
+	if got := Target("", "EMPLOYEES"); got != `"EMPLOYEES"` {
+		t.Errorf("bare = %s", got)
 	}
-}
-
-func TestIndexPriority(t *testing.T) {
-	tests := []struct {
-		label    string
-		expected int
-	}{
-		{"PK", 3},
-		{"UNIQUE", 2},
-		{"INDEX", 1},
-		{"UNKNOWN", 0},
-	}
-	for _, tt := range tests {
-		got := db.IndexPriority(tt.label)
-		if got != tt.expected {
-			t.Errorf("IndexPriority(%q) = %d, want %d", tt.label, got, tt.expected)
-		}
-	}
-}
-
-func TestFormatValue(t *testing.T) {
-	tests := []struct {
-		input    interface{}
-		expected string
-	}{
-		{nil, "NULL"},
-		{[]byte("hello"), "hello"},
-		{"test", "test"},
-		{int64(42), "42"},
-		{float64(3.14), "3.14"},
-		{true, "true"},
-	}
-	for _, tt := range tests {
-		got := db.FormatNativeCell(tt.input)
-		if got != tt.expected {
-			t.Errorf("FormatNativeCell(%v) = %q, want %q", tt.input, got, tt.expected)
-		}
-	}
-}
-
-func TestBackendKind(t *testing.T) {
-	b := &Backend{host: "localhost", db: &DB{dbName: "testdb"}}
-	if got := b.Kind(); got != "oracle" {
-		t.Errorf("Kind() = %q, want %q", got, "oracle")
-	}
-}
-
-func TestBackendTitle(t *testing.T) {
-	b := &Backend{host: "localhost", db: &DB{dbName: "testdb"}}
-	expected := "oracle://localhost/testdb"
-	if got := b.Title(); got != expected {
-		t.Errorf("Title() = %q, want %q", got, expected)
-	}
-}
-
-func TestBackendCurrentNamespace(t *testing.T) {
-	b := &Backend{db: &DB{dbName: "testdb"}}
-	if got := b.CurrentNamespace(); got != "testdb" {
-		t.Errorf("CurrentNamespace() = %q, want %q", got, "testdb")
-	}
-
-	b2 := &Backend{db: nil}
-	if got := b2.CurrentNamespace(); got != "" {
-		t.Errorf("CurrentNamespace() with nil db = %q, want empty", got)
-	}
-}
-
-func TestTableTarget(t *testing.T) {
-	b := &Backend{}
-	if got := b.TableTarget("sales", "orders"); got != `"sales"."orders"` {
-		t.Errorf("qualified = %s, want \"sales\".\"orders\"", got)
-	}
-	if got := b.TableTarget("", "orders"); got != `"orders"` {
-		t.Errorf("bare = %s, want \"orders\"", got)
+	if got := Target("HR", `odd"name`); got != `"HR"."odd""name"` {
+		t.Errorf("escaped = %s", got)
 	}
 }

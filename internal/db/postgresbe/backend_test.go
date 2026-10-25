@@ -3,121 +3,41 @@ package postgresbe
 import (
 	"testing"
 
-	"github.com/LinPr/sqltui/internal/db"
+	"github.com/dbcore/dbcore"
 )
 
-func TestConfigDsn(t *testing.T) {
-	tests := []struct {
-		name string
-		cfg  Config
-		want string
-	}{
-		{
-			name: "typical",
-			cfg:  Config{UserName: "postgres", Password: "pw", Host: "127.0.0.1", Port: "5432", DbName: "app", SslMode: "disable"},
-			want: "postgres://postgres:pw@127.0.0.1:5432/app?sslmode=disable",
-		},
-		{
-			name: "empty sslmode falls back to disable",
-			cfg:  Config{UserName: "u", Password: "p", Host: "h", Port: "5433", DbName: "d"},
-			want: "postgres://u:p@h:5433/d?sslmode=disable",
-		},
+func TestConnSpec(t *testing.T) {
+	spec := Config{UserName: "postgres", Password: "pw", Host: "127.0.0.1", Port: "5432", DbName: "app", SslMode: "disable"}.ConnSpec()
+	if spec.Kind != dbcore.KindPostgres || spec.Host != "127.0.0.1" || spec.Port != 5432 ||
+		spec.User != "postgres" || spec.Password != "pw" || spec.Database != "app" || spec.SSLMode != "disable" {
+		t.Fatalf("ConnSpec = %+v", spec)
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.cfg.Dsn(); got != tt.want {
-				t.Fatalf("Dsn() = %q, want %q", got, tt.want)
-			}
-		})
+	if spec.ConnectTimeout <= 0 {
+		t.Fatal("ConnectTimeout must bound the dial")
 	}
 }
 
-func TestCurrentNamespaceFallback(t *testing.T) {
-	if got := (&Backend{}).CurrentNamespace(); got != "public" {
-		t.Errorf("CurrentNamespace() without connection = %q, want public", got)
-	}
-	if got := (&Backend{db: &DB{}}).CurrentNamespace(); got != "public" {
-		t.Errorf("CurrentNamespace() with dead handle = %q, want public", got)
+// An empty sslmode becomes "disable", matching the pre-kernel DSN builder.
+func TestConnSpecSslModeDefault(t *testing.T) {
+	if got := (Config{}).ConnSpec().SSLMode; got != "disable" {
+		t.Fatalf("empty SslMode -> %q, want disable", got)
 	}
 }
 
-func TestHasReturningClause(t *testing.T) {
-	tests := []struct {
-		stmt string
-		want bool
-	}{
-		{"insert into t values (1) returning id", true},
-		{"UPDATE t SET x = 1 RETURNING *", true},
-		{"delete from t where id = 1", false},
-		{"INSERT INTO returning_log (a) VALUES (1)", false},
-		// Words inside literals, quoted identifiers, and comments are not
-		// clauses: none of those statements produces a result set.
-		{"UPDATE t SET note = 'returning'", false},
-		{"UPDATE t SET note = 'no returning here'", false},
-		{"UPDATE t SET \"returning\" = 1", false},
-		{"UPDATE t SET `returning` = 1", false},
-		{"UPDATE t SET [returning] = 1", false},
-		{"UPDATE t SET a = 1 -- returning", false},
-		{"UPDATE t SET a = 1 /* returning */", false},
-		// Escaped quotes do not terminate the literal early.
-		{"UPDATE t SET a = 'it''s returning'", false},
-		// Matching resumes after a comment.
-		{"UPDATE t SET a = 1 -- returning\nDELETE FROM t RETURNING *", true},
-		// Whole words only, never substrings.
-		{"UPDATE t SET returning_flag = 1", false},
-		{"UPDATE t SET a = 1 RETURNINGX", false},
-	}
-	for _, tt := range tests {
-		if got := db.HasReturningClause(tt.stmt); got != tt.want {
-			t.Errorf("HasReturningClause(%q) = %v, want %v", tt.stmt, got, tt.want)
-		}
+func TestConnSpecPortFallback(t *testing.T) {
+	if got := (Config{Port: "abc"}).ConnSpec().Port; got != 0 {
+		t.Errorf("unparsable port -> %d, want 0 (engine default 5432)", got)
 	}
 }
 
-func TestPrimaryKeysWithoutConnection(t *testing.T) {
-	b := &Backend{db: &DB{}}
-	pks, err := b.PrimaryKeys("public", "users")
-	if err == nil {
-		t.Fatalf("expected error from PrimaryKeys with no connection, got pks=%v", pks)
+func TestTarget(t *testing.T) {
+	if got := Target("public", "orders"); got != `"public"."orders"` {
+		t.Errorf("qualified = %s", got)
 	}
-}
-
-func TestColumnsMetaWithoutConnection(t *testing.T) {
-	b := &Backend{db: &DB{}}
-	cols, err := b.ColumnsMeta("public", "users")
-	if err == nil {
-		t.Fatalf("expected error from ColumnsMeta with no connection, got cols=%v", cols)
+	if got := Target("", "orders"); got != `"orders"` {
+		t.Errorf("bare = %s", got)
 	}
-}
-
-func TestFormatAny(t *testing.T) {
-	tests := []struct {
-		input any
-		want  string
-	}{
-		{nil, ""},
-		{"hello", "hello"},
-		{int16(42), "42"},
-		{int32(100), "100"},
-		{int64(9999), "9999"},
-		{float64(3.14), "3.14"},
-		{true, "true"},
-		{false, "false"},
-		{[]byte("raw"), "raw"},
-	}
-	for _, tt := range tests {
-		if got := formatAny(tt.input); got != tt.want {
-			t.Errorf("formatAny(%v) = %q, want %q", tt.input, got, tt.want)
-		}
-	}
-}
-
-func TestTableTarget(t *testing.T) {
-	b := &Backend{}
-	if got := b.TableTarget("sales", "orders"); got != `"sales"."orders"` {
-		t.Errorf("qualified = %s, want \"sales\".\"orders\"", got)
-	}
-	if got := b.TableTarget(`s"x`, "orders"); got != `"s""x"."orders"` {
-		t.Errorf("escaped = %s, want \"s\"\"x\".\"orders\"", got)
+	if got := Target("s", `odd"name`); got != `"s"."odd""name"` {
+		t.Errorf("escaped = %s", got)
 	}
 }

@@ -21,16 +21,19 @@ func newTestBackend(t *testing.T) *sqlitebe.Backend {
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
-	t.Cleanup(func() {
-		be.Close()
-		sqlitebe.DbClinet = nil
-	})
+	t.Cleanup(func() { be.Close() })
 	return be
 }
 
 func TestConnectRejectsMissingFile(t *testing.T) {
 	if _, err := sqlitebe.Connect(sqlitebe.Config{FilePath: filepath.Join(t.TempDir(), "nope.db")}); err == nil {
 		t.Fatal("expected error for nonexistent file")
+	}
+}
+
+func TestConnectRejectsEmptyPath(t *testing.T) {
+	if _, err := sqlitebe.Connect(sqlitebe.Config{FilePath: "  "}); err == nil {
+		t.Fatal("expected error for empty path")
 	}
 }
 
@@ -88,9 +91,19 @@ func TestBackendEndToEnd(t *testing.T) {
 	if f.Cell(0, 1) != "cat" || f.Cell(1, 2) != "woof" {
 		t.Fatalf("unexpected cells: %v / %v", f.Cell(0, 1), f.Cell(1, 2))
 	}
-	// raw-byte scan renders NULL as an empty string cell
-	if f.Cell(2, 2) != "" {
-		t.Fatalf("NULL cell = %#v, want empty string", f.Cell(2, 2))
+	// kernel values keep NULL distinct from the empty string (the pre-kernel
+	// raw-byte scan collapsed both)
+	if f.Cell(2, 2) != nil {
+		t.Fatalf("NULL cell = %#v, want nil", f.Cell(2, 2))
+	}
+
+	// INSERT ... RETURNING routes to the query path
+	res, err = be.Run(`INSERT INTO pets (name, sound) VALUES ('owl', NULL) RETURNING id, name`)
+	if err != nil {
+		t.Fatalf("insert returning: %v", err)
+	}
+	if res.Frame == nil || res.Frame.NumRows() != 1 {
+		t.Fatalf("INSERT RETURNING should produce a one-row frame, got %+v", res)
 	}
 
 	// namespaces / tables
@@ -98,8 +111,15 @@ func TestBackendEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Namespaces: %v", err)
 	}
-	if len(ns) != 1 || ns[0] != "" {
-		t.Fatalf("Namespaces = %v, want [\"\"]", ns)
+	// SQLite reports the attached databases; the main one is always present.
+	found := false
+	for _, n := range ns {
+		if n == "main" || n == "" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("Namespaces = %v, want the main database", ns)
 	}
 	tables, err := be.Tables("ignored")
 	if err != nil {
@@ -107,6 +127,40 @@ func TestBackendEndToEnd(t *testing.T) {
 	}
 	if len(tables) != 1 || tables[0] != "pets" {
 		t.Fatalf("Tables = %v, want [pets]", tables)
+	}
+
+	// primary keys and column metadata via the kernel catalog
+	pks, err := be.PrimaryKeys("", "pets")
+	if err != nil {
+		t.Fatalf("PrimaryKeys: %v", err)
+	}
+	if len(pks) != 1 || pks[0] != "id" {
+		t.Fatalf("PrimaryKeys = %v, want [id]", pks)
+	}
+	cols, err := be.ColumnsMeta("", "pets")
+	if err != nil {
+		t.Fatalf("ColumnsMeta: %v", err)
+	}
+	if len(cols) != 3 || cols[0].Name != "id" || cols[1].Name != "name" || cols[2].Name != "sound" {
+		t.Fatalf("ColumnsMeta = %+v", cols)
+	}
+	// SQLite's pragma reports notnull=0 even for an implicit rowid-alias
+	// INTEGER PRIMARY KEY, so id reads as nullable — same as the pre-kernel
+	// DAO, which mapped the same pragma column.
+	if cols[0].IsNullable != "YES" || cols[1].IsNullable != "YES" || cols[2].IsNullable != "YES" {
+		t.Fatalf("ColumnsMeta = %+v", cols)
+	}
+
+	// index labels via the kernel's structured index metadata
+	if _, err := be.Run(`CREATE UNIQUE INDEX pets_name ON pets (name)`); err != nil {
+		t.Fatalf("create index: %v", err)
+	}
+	idx, err := be.ColumnIndexTypes("", "pets")
+	if err != nil {
+		t.Fatalf("ColumnIndexTypes: %v", err)
+	}
+	if idx["id"] != "PK" || idx["name"] != "UNIQUE" {
+		t.Fatalf("ColumnIndexTypes = %v, want id=PK name=UNIQUE", idx)
 	}
 
 	// fetch table with limit
@@ -146,8 +200,46 @@ func TestRunEmptyStatement(t *testing.T) {
 }
 
 func TestTableTarget(t *testing.T) {
-	b := &sqlitebe.Backend{}
-	if got := b.TableTarget("anything", "orders"); got != `"orders"` {
+	if got := sqlitebe.Target("anything", "orders"); got != `"orders"` {
 		t.Errorf("target = %s, want \"orders\" (namespace ignored)", got)
+	}
+}
+
+func TestPrimaryKeysOrdinalAndColumnsMetaDefaults(t *testing.T) {
+	be := newTestBackend(t)
+
+	if _, err := be.Run(`CREATE TABLE kv (k TEXT, v TEXT, PRIMARY KEY (k, v))`); err != nil {
+		t.Fatalf("create kv: %v", err)
+	}
+	pks, err := be.PrimaryKeys("", "kv")
+	if err != nil {
+		t.Fatalf("PrimaryKeys(kv): %v", err)
+	}
+	if len(pks) != 2 || pks[0] != "k" || pks[1] != "v" {
+		t.Fatalf("expected [k v] in pk-ordinal order, got %v", pks)
+	}
+
+	if _, err := be.Run(`CREATE TABLE meta_demo (
+		id INTEGER NOT NULL PRIMARY KEY,
+		email TEXT NOT NULL DEFAULT 'unknown',
+		note TEXT
+	)`); err != nil {
+		t.Fatalf("create meta_demo: %v", err)
+	}
+	cols, err := be.ColumnsMeta("", "meta_demo")
+	if err != nil {
+		t.Fatalf("ColumnsMeta(meta_demo): %v", err)
+	}
+	if len(cols) != 3 {
+		t.Fatalf("expected 3 columns, got %d (%v)", len(cols), cols)
+	}
+	if cols[0].Name != "id" || cols[0].IsNullable != "NO" || cols[0].Default != "" {
+		t.Fatalf("id column = %+v", cols[0])
+	}
+	if cols[1].Name != "email" || cols[1].IsNullable != "NO" || cols[1].Default != "'unknown'" {
+		t.Fatalf("email column = %+v", cols[1])
+	}
+	if cols[2].Name != "note" || cols[2].IsNullable != "YES" || cols[2].Default != "" {
+		t.Fatalf("note column = %+v", cols[2])
 	}
 }

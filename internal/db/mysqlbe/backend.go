@@ -1,12 +1,19 @@
+// Package mysqlbe connects to a MySQL server through the dbcore kernel: the
+// kernel owns the DSN, the connection, statement routing, and every catalog
+// query; this wrapper only carries the UI presentation semantics.
 package mysqlbe
 
 import (
+	"context"
 	"fmt"
 	"strings"
+	"time"
 
-	"github.com/LinPr/sqltui/internal/data"
+	"github.com/dbcore/dbcore"
+	_ "github.com/dbcore/dbcore/mysql" // registers the mysql factory
+
 	"github.com/LinPr/sqltui/internal/db"
-	"github.com/go-sql-driver/mysql"
+	"github.com/LinPr/sqltui/internal/db/core"
 )
 
 // Config holds the connection parameters for a MySQL server.
@@ -18,137 +25,66 @@ type Config struct {
 	DbName   string
 }
 
-// Dsn renders the config as a driver connection string via the driver's own
-// formatter, so passwords/usernames containing @ : / ( ) and db names with ?
-// are escaped correctly instead of corrupting the DSN (the same treatment the
-// sqlserver/oracle backends give their URLs with QueryEscape).
-func (c Config) Dsn() string {
-	cfg := mysql.NewConfig()
-	cfg.User = c.UserName
-	cfg.Passwd = c.Password
-	cfg.Net = "tcp"
-	cfg.Addr = c.Host + ":" + c.Port
-	cfg.DBName = c.DbName
-	cfg.Params = map[string]string{"charset": "utf8", "parseTime": "true"}
-	return cfg.FormatDSN()
+// ConnectTimeout bounds the initial dial (the same value every sqltui backend
+// used before the kernel migration).
+const ConnectTimeout = 10 * time.Second
+
+// ConnSpec renders the config as a kernel connection spec. The port falls
+// back to the engine default when the form leaves it blank or unparsable; the
+// charset param keeps the pre-kernel connection behavior.
+func (c Config) ConnSpec() dbcore.ConnSpec {
+	return dbcore.ConnSpec{
+		Kind:           dbcore.KindMySQL,
+		Host:           strings.TrimSpace(c.Host),
+		Port:           core.ParsePort(c.Port),
+		User:           c.UserName,
+		Password:       c.Password,
+		Database:       strings.TrimSpace(c.DbName),
+		Params:         map[string]string{"charset": "utf8"},
+		ConnectTimeout: ConnectTimeout,
+	}
 }
 
-// Backend adapts the mysql data-access layer to the db.Backend contract.
+// Backend adapts the kernel mysql driver to the db.Backend contract.
 type Backend struct {
-	db   *DB
-	host string
+	*core.Backend
 }
 
-var _ db.Backend = (*Backend)(nil)
-var _ db.TableTargeter = (*Backend)(nil)
-var _ db.Quoter = (*Backend)(nil)
-var _ db.Escaper = (*Backend)(nil)
+var (
+	_ db.Backend       = (*Backend)(nil)
+	_ db.TableTargeter = (*Backend)(nil)
+	_ db.Quoter        = (*Backend)(nil)
+	_ db.Escaper       = (*Backend)(nil)
+)
 
-// Connect opens a mysql connection and pings it before returning.
+// Connect opens a mysql connection through the kernel and pings it before
+// returning.
 func Connect(cfg Config) (*Backend, error) {
-	conn, err := NewDB(cfg.Dsn(), cfg.DbName)
+	drv, err := dbcore.Open(context.Background(), cfg.ConnSpec(), dbcore.PoolConfig{})
 	if err != nil {
 		return nil, err
 	}
-	return &Backend{db: conn, host: cfg.Host}, nil
-}
-
-func (b *Backend) Kind() string { return "mysql" }
-
-func (b *Backend) Title() string {
-	return fmt.Sprintf("mysql://%s/%s", b.host, b.db.dbName)
-}
-
-// Run executes a statement, routing queries vs. mutations the same way the
-// underlying data-access layer does. Query results come back as an
-// all-string frame (NULL is not distinguishable from the empty string in the
-// raw byte scan, so cells stay strings as-is).
-func (b *Backend) Run(stmt string) (db.Result, error) {
-	raw, err := b.db.RawSqlCommand(stmt)
-	if err != nil {
-		return db.Result{}, err
+	sql, ok := drv.AsSQL()
+	if !ok {
+		drv.Close()
+		return nil, fmt.Errorf("mysql: kernel driver is not an SQL driver")
 	}
-	if raw.IsDQL {
-		return db.Result{Frame: db.StringFrame(raw.Fields, raw.Records)}, nil
-	}
-
-	exec := &db.ExecResult{HasLastInsert: true}
-	if raw.Result != nil {
-		if n, err := raw.Result.RowsAffected(); err == nil {
-			exec.RowsAffected = n
-		}
-		if id, err := raw.Result.LastInsertId(); err == nil {
-			exec.LastInsertID = id
-		}
-	}
-	return db.Result{Exec: exec}, nil
+	return &Backend{Backend: core.New(sql, core.Options{
+		Kind:            "mysql",
+		Title:           fmt.Sprintf("mysql://%s/%s", strings.TrimSpace(cfg.Host), strings.TrimSpace(cfg.DbName)),
+		Target:          Target,
+		CurrentNS:       func(context.Context) string { return strings.TrimSpace(cfg.DbName) },
+		HasLastInsertID: true,
+	})}, nil
 }
 
-// Namespaces lists the databases of the server.
-func (b *Backend) Namespaces() ([]string, error) {
-	return b.db.ShowDatabases()
-}
-
-// CurrentNamespace reports the database this connection was opened against,
-// so browsers can scope their listing to it (optional interface, not part of
-// db.Backend).
-func (b *Backend) CurrentNamespace() string {
-	if b.db == nil {
-		return ""
-	}
-	return b.db.dbName
-}
-
-// Tables lists the tables of one database.
-func (b *Backend) Tables(namespace string) ([]string, error) {
-	return b.db.ShowDatabaseTables(namespace)
-}
-
-// TableTarget spells namespace.table as `ns`.`tbl` (each part escaped).
-func (b *Backend) TableTarget(namespace, table string) string {
-	ident := db.QuoteIdentBacktick(table)
+// Target spells namespace.table as `ns`.`tbl` (each part kernel-quoted); an
+// empty namespace yields just `tbl`, which resolves on the connection's
+// current database.
+func Target(namespace, table string) string {
+	tbl := core.QuoteIdent("mysql", table)
 	if namespace != "" {
-		ident = db.QuoteIdentBacktick(namespace) + "." + ident
+		return core.QuoteIdent("mysql", namespace) + "." + tbl
 	}
-	return ident
-}
-
-// FetchTable loads up to limit rows of namespace.table.
-func (b *Backend) FetchTable(namespace, table string, limit int) (*data.Frame, error) {
-	query := fmt.Sprintf("select * from %s limit %d", b.TableTarget(namespace, table), limit)
-	fields, records, err := b.db.RawQuery(query)
-	if err != nil {
-		return nil, err
-	}
-	return db.StringFrame(fields, records), nil
-}
-
-// PrimaryKeys lists the primary-key column names of namespace.table.
-func (b *Backend) PrimaryKeys(namespace, table string) ([]string, error) {
-	return b.db.PrimaryKeys(namespace, table)
-}
-
-// ColumnsMeta returns column metadata for namespace.table.
-func (b *Backend) ColumnsMeta(namespace, table string) ([]db.ColumnMeta, error) {
-	return b.db.ColumnsMeta(namespace, table)
-}
-
-// ColumnIndexTypes returns index type labels for indexed columns of namespace.table.
-func (b *Backend) ColumnIndexTypes(namespace, table string) (map[string]string, error) {
-	return b.db.ColumnIndexTypes(namespace, table)
-}
-
-// QuoteIdent quotes an identifier with MySQL backticks, doubling embedded backticks.
-func (b *Backend) QuoteIdent(name string) string {
-	return db.QuoteIdentBacktick(name)
-}
-
-// EscapeLiteral wraps a string as a SQL literal, doubling backslashes (MySQL default sql_mode).
-func (b *Backend) EscapeLiteral(s string) string {
-	s = strings.ReplaceAll(s, `\`, `\\`)
-	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
-}
-
-func (b *Backend) Close() error {
-	return b.db.Close()
+	return tbl
 }

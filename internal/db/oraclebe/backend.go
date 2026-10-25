@@ -1,14 +1,20 @@
+// Package oraclebe connects to an Oracle database through the dbcore kernel:
+// the kernel owns the DSN (URL-escaped credentials), the connection,
+// statement routing, and every catalog query; this wrapper only carries the
+// UI presentation semantics.
 package oraclebe
 
 import (
 	"context"
 	"fmt"
-	"net/url"
 	"strings"
 	"time"
 
-	"github.com/LinPr/sqltui/internal/data"
+	"github.com/dbcore/dbcore"
+	_ "github.com/dbcore/dbcore/oracle" // registers the oracle factory
+
 	"github.com/LinPr/sqltui/internal/db"
+	"github.com/LinPr/sqltui/internal/db/core"
 )
 
 // Config holds the connection parameters for an Oracle database.
@@ -19,6 +25,10 @@ type Config struct {
 	Port     string
 	DbName   string
 }
+
+// ConnectTimeout bounds the initial dial (the same value every sqltui backend
+// used before the kernel migration).
+const ConnectTimeout = 10 * time.Second
 
 // Validate checks that all required fields are present and returns an error
 // describing the first missing field, or nil if the config is valid.
@@ -38,203 +48,60 @@ func (c Config) Validate() error {
 	return nil
 }
 
-// Dsn renders the config as a driver connection string with URL-encoded
-// credentials so that special characters in passwords are handled safely.
-func (c Config) Dsn() string {
-	return fmt.Sprintf("oracle://%s:%s@%s:%s/%s",
-		url.QueryEscape(c.UserName), url.QueryEscape(c.Password),
-		c.Host, c.Port, url.QueryEscape(c.DbName))
+// ConnSpec renders the config as a kernel connection spec; the kernel's DSN
+// builder URL-escapes credentials and the service name, so special characters
+// in passwords survive.
+func (c Config) ConnSpec() dbcore.ConnSpec {
+	return dbcore.ConnSpec{
+		Kind:           dbcore.KindOracle,
+		Host:           strings.TrimSpace(c.Host),
+		Port:           core.ParsePort(c.Port),
+		User:           c.UserName,
+		Password:       c.Password,
+		Database:       strings.TrimSpace(c.DbName),
+		ConnectTimeout: ConnectTimeout,
+	}
 }
 
-// Backend adapts the Oracle data-access layer to the db.Backend contract.
+// Backend adapts the kernel oracle driver to the db.Backend contract.
 type Backend struct {
-	db   *DB
-	host string
+	*core.Backend
 }
 
-var _ db.Backend = (*Backend)(nil)
-var _ db.TableTargeter = (*Backend)(nil)
+var (
+	_ db.Backend       = (*Backend)(nil)
+	_ db.TableTargeter = (*Backend)(nil)
+)
 
-// Connect opens an Oracle connection, validates the config, pings the
-// server, and returns a ready-to-use Backend.
+// Connect opens an Oracle connection through the kernel, validates the
+// config, pings the server, and returns a ready-to-use Backend.
 func Connect(cfg Config) (*Backend, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("oracle connect: invalid config: %w", err)
 	}
-	conn, err := NewDB(cfg.Dsn(), cfg.DbName)
+	drv, err := dbcore.Open(context.Background(), cfg.ConnSpec(), dbcore.PoolConfig{})
 	if err != nil {
 		return nil, fmt.Errorf("oracle connect: %w", err)
 	}
-	return &Backend{db: conn, host: cfg.Host}, nil
+	sql, ok := drv.AsSQL()
+	if !ok {
+		drv.Close()
+		return nil, fmt.Errorf("oracle: kernel driver is not an SQL driver")
+	}
+	return &Backend{Backend: core.New(sql, core.Options{
+		Kind:    "oracle",
+		Title:   fmt.Sprintf("oracle://%s/%s", strings.TrimSpace(cfg.Host), strings.TrimSpace(cfg.DbName)),
+		Target:  Target,
+		CurrentNS: func(context.Context) string { return strings.TrimSpace(cfg.UserName) },
+	})}, nil
 }
 
-// Kind returns the engine identifier used for keyword autocompletion.
-func (b *Backend) Kind() string { return "oracle" }
-
-// Title returns a human-readable connection title for the UI header.
-func (b *Backend) Title() string {
-	if b.db == nil {
-		return "oracle://(disconnected)"
-	}
-	return fmt.Sprintf("oracle://%s/%s", b.host, b.db.dbName)
-}
-
-// Run executes a statement, routing queries vs. mutations. Query results
-// come back as a typed data.Frame; mutations return an ExecResult with
-// RowsAffected.
-func (b *Backend) Run(stmt string) (db.Result, error) {
-	words := strings.Fields(strings.TrimSpace(stmt))
-	if len(words) == 0 {
-		return db.Result{}, fmt.Errorf("empty query")
-	}
-
-	isDQL := false
-	switch strings.ToLower(words[0]) {
-	case SELECT, WITH, SHOW, TABLE, VALUES:
-		isDQL = true
-	case "desc", "describe":
-		isDQL = true
-	default:
-		switch {
-		case strings.HasPrefix(words[0], "("):
-			isDQL = true
-		default:
-			isDQL = db.HasReturningClause(stmt)
-		}
-	}
-
-	if isDQL {
-		frame, err := b.queryFrame(stmt)
-		if err != nil {
-			return db.Result{}, fmt.Errorf("oracle query: %w", err)
-		}
-		return db.Result{Frame: frame}, nil
-	}
-
-	res, err := b.db.RawExec(stmt)
-	if err != nil {
-		return db.Result{}, fmt.Errorf("oracle exec: %w", err)
-	}
-	exec := &db.ExecResult{HasLastInsert: false}
-	if res != nil {
-		if n, err := res.RowsAffected(); err == nil {
-			exec.RowsAffected = n
-		}
-	}
-	return db.Result{Exec: exec}, nil
-}
-
-// Namespaces lists the schemas on the server.
-func (b *Backend) Namespaces() ([]string, error) {
-	return b.db.ShowSchemas()
-}
-
-// CurrentNamespace reports the schema this connection was opened against.
-func (b *Backend) CurrentNamespace() string {
-	if b.db == nil {
-		return ""
-	}
-	return b.db.dbName
-}
-
-// Tables lists the tables of one schema.
-func (b *Backend) Tables(namespace string) ([]string, error) {
-	return b.db.ShowSchemaTables(namespace)
-}
-
-// TableTarget spells namespace.table as "ns"."tbl" (empty namespace drops
-// the owner qualifier), the same spelling FetchTable uses.
-func (b *Backend) TableTarget(namespace, table string) string {
-	ident := db.QuoteIdentDouble(table)
+// Target spells namespace.table as "ns"."tbl" (kernel-quoted; empty namespace
+// drops the owner qualifier, resolving on the login user's schema).
+func Target(namespace, table string) string {
+	tbl := core.QuoteIdent("oracle", table)
 	if namespace != "" {
-		ident = db.QuoteIdentDouble(namespace) + "." + ident
+		return core.QuoteIdent("oracle", namespace) + "." + tbl
 	}
-	return ident
-}
-
-// FetchTable loads up to limit rows of namespace.table, preserving native
-// Go types for accurate display.
-func (b *Backend) FetchTable(namespace, table string, limit int) (*data.Frame, error) {
-	if limit <= 0 {
-		limit = 1
-	} else if limit > 10000 {
-		limit = 10000
-	}
-	query := fmt.Sprintf("SELECT * FROM %s WHERE ROWNUM <= %d", b.TableTarget(namespace, table), limit)
-	return b.queryFrame(query)
-}
-
-// PrimaryKeys lists the primary-key column names of namespace.table.
-func (b *Backend) PrimaryKeys(namespace, table string) ([]string, error) {
-	return b.db.PrimaryKeys(namespace, table)
-}
-
-// ColumnsMeta returns column metadata for namespace.table.
-func (b *Backend) ColumnsMeta(namespace, table string) ([]db.ColumnMeta, error) {
-	return b.db.ColumnsMeta(namespace, table)
-}
-
-// ColumnIndexTypes returns index type labels for indexed columns.
-func (b *Backend) ColumnIndexTypes(namespace, table string) (map[string]string, error) {
-	return b.db.ColumnIndexTypes(namespace, table)
-}
-
-// Close releases the underlying database connection.
-func (b *Backend) Close() error {
-	return b.db.Close()
-}
-
-// queryFrame runs a query and scans the result set into a frame, preserving
-// native Go types (int64, float64, bool, time.Time, string, nil) instead of
-// converting everything to strings.
-func (b *Backend) queryFrame(query string) (*data.Frame, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), QueryTimeout)
-	defer cancel()
-
-	rows, err := b.db.QueryContext(ctx, query)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	fields, err := rows.Columns()
-	if err != nil {
-		return nil, err
-	}
-
-	frame := data.New(fields...)
-	for rows.Next() {
-		values := make([]any, len(fields))
-		for i := range values {
-			values[i] = new(any)
-		}
-		if err := rows.Scan(values...); err != nil {
-			return nil, err
-		}
-		row := make([]any, len(fields))
-		for i, value := range values {
-			row[i] = cellValue(*(value.(*any)))
-		}
-		frame.AppendRow(row)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return frame, nil
-}
-
-// cellValue converts a raw driver value into a display-friendly Go type.
-func cellValue(value any) any {
-	switch v := value.(type) {
-	case nil:
-		return nil
-	case []byte:
-		return string(v)
-	case time.Time:
-		return v
-	case string, int64, float64, bool:
-		return v
-	default:
-		return fmt.Sprintf("%v", v)
-	}
+	return tbl
 }
