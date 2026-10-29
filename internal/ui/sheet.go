@@ -137,6 +137,29 @@ func sheetMatchedCols(f *data.Frame, pattern string) []int {
 	return out
 }
 
+// sheetActiveCol resolves the pane's field cursor against the filter's matched
+// set: with a filter active SheetField indexes the matched columns (pane.go's
+// contract — the render and type paths dereference it that way), so editing
+// must address the column the user is actually looking at. Returns -1 when the
+// cursor does not resolve (no match or out of range), which callers treat as
+// "no edit".
+func sheetActiveCol(f *data.Frame, field int, filter string) int {
+	if f == nil {
+		return -1
+	}
+	if strings.TrimSpace(filter) == "" {
+		if field < 0 || field >= f.NumCols() {
+			return -1
+		}
+		return field
+	}
+	matched := sheetMatchedCols(f, filter)
+	if field < 0 || field >= len(matched) {
+		return -1
+	}
+	return matched[field]
+}
+
 // sheetMatchedColsWithPos is like sheetMatchedCols but also returns the fuzzy
 // match rune-positions for each matched entry (for highlight rendering).
 func sheetMatchedColsWithPos(f *data.Frame, pattern string) ([]int, [][]int) {

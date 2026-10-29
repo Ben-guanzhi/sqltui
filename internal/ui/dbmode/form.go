@@ -374,8 +374,15 @@ func (o *connForm) Update(msg tea.Msg) (ui.Overlay, tea.Cmd) {
 			o.errText = m.err.Error()
 			return o, nil
 		}
-		_ = saveConfig(m.kind, m.vals) // legacy behavior: persist on success
-		return o, tea.Sequence(o.successCmds(m)...)
+		// The live session is fine either way; a failed save only costs the
+		// next launch its prefill. Surface it instead of swallowing it —
+		// a disk-full or permission error would otherwise be invisible.
+		msgs := o.successCmds(m)
+		if err := saveConfig(m.kind, m.vals); err != nil {
+			text := "connected, but saving the connection failed: " + err.Error()
+			msgs = append(msgs, func() tea.Msg { return ui.ToastMsg{Text: text} })
+		}
+		return o, tea.Sequence(msgs...)
 
 	case tea.PasteMsg:
 		o.insertText(m.Content)

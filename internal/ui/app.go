@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -98,12 +99,41 @@ func New(opts Options) *App {
 	return a
 }
 
+// deleteKeysReadyMsg carries a resolved primary-key set back into the update
+// loop, so the confirm overlay is staged from UI-thread state rather than from
+// a catalog read inside it.
+type deleteKeysReadyMsg struct {
+	frame *data.Frame
+	rows  []int
+	table string
+	ns    string
+}
+
+// onBackendChanged lets the db-mode integration drop per-connection caches
+// when the app switches connections (the OpenObserve schema overlay captures
+// the backend it was built with). dbmode registers it via SetOnBackendChanged;
+// ui cannot import dbmode (the dependency runs the other way).
+var onBackendChanged func()
+
+// SetOnBackendChanged installs the backend-switch hook (nil clears it).
+func SetOnBackendChanged(fn func()) { onBackendChanged = fn }
+
 // Run drives the app to completion on the terminal. Whatever live
 // connections the app owns are closed when the program returns, so every
 // exit path (last tab closed, quit, crash-recoverable return) drops them.
-func Run(app *App) error {
-	_, err := tea.NewProgram(app).Run()
-	app.CloseConnections()
+func Run(app *App) (err error) {
+	// defer 的注册顺序是执行的倒序：panic 时先跑 CloseConnections（注册在后、
+	// 先执行），再由 recover 把 panic 转成带栈的错误。此前的顺序调用在 panic
+	// 路径会跳过清理，与"every exit path drops them"矛盾；裸 panic 还会把
+	// 终端留在备用屏里没有交代。
+	defer func() {
+		if r := recover(); r != nil {
+			app.CloseConnections()
+			err = fmt.Errorf("internal error: %v\n%s", r, debug.Stack())
+		}
+	}()
+	defer app.CloseConnections()
+	_, err = tea.NewProgram(app).Run()
 	return err
 }
 
@@ -143,6 +173,16 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				_ = a.backend.Close() // superseded: a reconnect replaces it
 			}
 			a.backend = m.Backend
+			// The completion cache pins the backend it was warmed against; a
+			// new connection must rebind it and drop the stale snapshot, or
+			// sheet type rows silently degrade and every warm fetch is
+			// discarded until the query editor happens to re-warm it.
+			a.schemaC.mu.Lock()
+			a.schemaC.resetFor(m.Backend)
+			a.schemaC.mu.Unlock()
+			if onBackendChanged != nil {
+				onBackendChanged()
+			}
 		}
 		if m.KV != nil && m.KV != a.kv {
 			if a.kv != nil {
@@ -151,6 +191,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.kv = m.KV
 		}
 		return a, nil
+
+	case deleteKeysReadyMsg:
+		a.pendingDelete = &PendingDelete{Frame: m.frame, Rows: m.rows, Table: m.table, Namespace: m.ns}
+		return a, a.runCommand("confirmdelete", "")
 
 	case CloseOverlayMsg:
 		if n := len(a.overlays); n > 0 {
@@ -772,15 +816,18 @@ func (a *App) handleSheetEditKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		p.SheetEdit = LineInput{}
 		return a, nil
 	case "ctrl+s":
-		if p.SheetField < 0 || p.SheetField >= f.NumCols() {
+		// Same matched-set resolution as ActEdit: the UPDATE must name the
+		// column the user was looking at, not the frame's raw index.
+		col := sheetActiveCol(f, p.SheetField, p.SheetFilter.String())
+		if col < 0 {
 			return a, nil
 		}
 		a.pendingEdit = &PendingEdit{
 			Frame:     f,
 			Row:       p.Table.Sel(),
-			Col:       p.SheetField,
-			ColName:   f.Columns[p.SheetField].Name,
-			OldValue:  f.CellString(p.Table.Sel(), p.SheetField),
+			Col:       col,
+			ColName:   f.Columns[col].Name,
+			OldValue:  f.CellString(p.Table.Sel(), col),
 			NewValue:  p.SheetEdit.String(),
 			Table:     a.BaseCrumb(),
 			Namespace: a.CurrentTableNamespace(),
@@ -796,7 +843,11 @@ func (a *App) handleSheetEditKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	_, valW := sheetTableGeometry(f, a.width)
 	// drawer header: fieldname(type) + separator + hint = 3 lines
 	visible := max(1, max(1, a.height-1)-3)
-	count := sheetValueLineCount(f, p.Table.Sel(), p.SheetField, valW)
+	editCol := sheetActiveCol(f, p.SheetField, p.SheetFilter.String())
+	count := 0
+	if editCol >= 0 {
+		count = sheetValueLineCount(f, p.Table.Sel(), editCol, valW)
+	}
 	if editing := p.SheetEdit.Len(); editing > 0 {
 		count = strings.Count(ansi.Wrap(p.SheetEdit.String(), valW, ""), "\n") + 1
 	}
@@ -921,7 +972,14 @@ func (a *App) dispatch(action, key string) tea.Cmd {
 		if p.SheetEditing {
 			return nil
 		}
-		val := f.CellString(p.Table.Sel(), p.SheetField)
+		// SheetField is an index into the filter's matched set, not the frame:
+		// editing the raw index while a filter is active would read (and then
+		// ctrl+s write) a different column than the one on screen.
+		col := sheetActiveCol(f, p.SheetField, p.SheetFilter.String())
+		if col < 0 {
+			return nil
+		}
+		val := f.CellString(p.Table.Sel(), col)
 		p.SheetEdit = NewLineInput(val)
 		p.SheetEditing = true
 		p.SheetValOff = 0
@@ -1138,16 +1196,20 @@ func (a *App) startDelete() tea.Cmd {
 	if a.backend != nil {
 		table := a.BaseCrumb()
 		ns := a.CurrentTableNamespace()
-		pks, err := a.backend.PrimaryKeys(ns, table)
-		if err != nil {
-			e := err
-			return func() tea.Msg { return ErrorMsg{Err: e} }
+		// The PK probe is a catalog query (30s timeout): issuing it from the
+		// Update loop froze the whole TUI for that long on a dead connection.
+		// Resolve it in the command's goroutine; the ready message re-enters
+		// the update loop to stage the confirm overlay.
+		return func() tea.Msg {
+			pks, err := a.backend.PrimaryKeys(ns, table)
+			if err != nil {
+				return ErrorMsg{Err: err}
+			}
+			if len(pks) == 0 {
+				return ToastMsg{Text: "no primary key, cannot delete"}
+			}
+			return deleteKeysReadyMsg{frame: f, rows: rows, table: table, ns: ns}
 		}
-		if len(pks) == 0 {
-			return a.setToast("no primary key, cannot delete")
-		}
-		a.pendingDelete = &PendingDelete{Frame: f, Rows: rows, Table: table, Namespace: ns}
-		return a.runCommand("confirmdelete", "")
 	}
 	// file mode
 	a.pendingDelete = &PendingDelete{Frame: f, Rows: rows}

@@ -775,3 +775,35 @@ func TestSheetFilterBackspaceAndCtrlU(t *testing.T) {
 		t.Fatalf("after ctrl+u matched = %d cols, want %d", len(matched), f.NumCols())
 	}
 }
+
+// SheetField is an index into the filter's matched set (pane.go's contract).
+// Editing used to dereference it as the frame's raw column: with a filter
+// active, e then ctrl+s wrote the UPDATE to a different column than the one
+// on screen. The resolver is the contract's single enforcement point.
+func TestSheetActiveColResolvesMatchedSet(t *testing.T) {
+	f := data.New("id", "name", "note")
+
+	// No filter: the field cursor is the frame index itself.
+	if got := sheetActiveCol(f, 2, ""); got != 2 {
+		t.Fatalf("unfiltered resolve = %d, want 2", got)
+	}
+	if got := sheetActiveCol(f, 99, ""); got != -1 {
+		t.Fatalf("out-of-range resolve = %d, want -1", got)
+	}
+
+	// Filter "nme" fuzzy-matches "name" (index 1); the cursor at 0 must
+	// resolve to column 1, and a cursor past the matched set is refused.
+	matched := sheetMatchedCols(f, "nme")
+	if len(matched) == 0 || f.Columns[matched[0]].Name != "name" {
+		t.Fatalf("matched = %v, want [name]", matched)
+	}
+	if got := sheetActiveCol(f, 0, "nme"); got != matched[0] {
+		t.Fatalf("filtered resolve = %d, want %d", got, matched[0])
+	}
+	if got := sheetActiveCol(f, len(matched), "nme"); got != -1 {
+		t.Fatalf("cursor past matched set = %d, want -1", got)
+	}
+	if got := sheetActiveCol(nil, 0, ""); got != -1 {
+		t.Fatalf("nil frame = %d, want -1", got)
+	}
+}

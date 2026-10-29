@@ -79,6 +79,9 @@ func RegisterFactories(kind string) {
 	registerOnce.Do(func() {
 		origQuery = ui.Factories["query"]
 		origSchema = ui.Factories["schema"]
+		// 换连接必须弃掉单例 schema 浏览器：它构造时捕获了 ctx.Backend()，
+		// 复用会让重连后的 org/host 仍从旧连接拉取。
+		ui.SetOnBackendChanged(func() { cachedOobeSchema = nil })
 	})
 
 	ui.Factories["opentable"] = openTableFactory

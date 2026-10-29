@@ -317,27 +317,29 @@ func (r stmtRunner) run(stmt string, args []any) (db.Result, error) {
 func commitCellEdit(ctx AppContext, pe PendingEdit) tea.Cmd {
 	be := ctx.Backend()
 	if be != nil {
-		pks, err := be.PrimaryKeys(pe.Namespace, pe.Table)
-		if err != nil {
-			e := err
-			return func() tea.Msg { return ErrorMsg{Err: e} }
-		}
-		if len(pks) == 0 {
-			return func() tea.Msg { return ErrorMsg{Err: fmt.Errorf("no primary key, cannot edit")} }
-		}
-		r := runnerFor(be)
-		var stmt string
-		var args []any
-		if r.binds() {
-			stmt, args, err = buildUpdateBound(be, pe.Table, pks, pe.Frame, pe.Row, pe.ColName, pe.NewValue)
-		} else {
-			stmt, err = buildUpdate(be, pe.Table, pks, pe.Frame, pe.Row, pe.ColName, pe.NewValue)
-		}
-		if err != nil {
-			e := err
-			return func() tea.Msg { return ErrorMsg{Err: e} }
-		}
+		// PrimaryKeys resolves through a catalog query (30s timeout): running it
+		// here means the Update loop blocks on a dead connection every time the
+		// user confirms an edit. Everything up to the statement execution moves
+		// into the command's closure, on the same goroutine as the UPDATE.
 		return func() tea.Msg {
+			pks, err := be.PrimaryKeys(pe.Namespace, pe.Table)
+			if err != nil {
+				return ErrorMsg{Err: err}
+			}
+			if len(pks) == 0 {
+				return ErrorMsg{Err: fmt.Errorf("no primary key, cannot edit")}
+			}
+			r := runnerFor(be)
+			var stmt string
+			var args []any
+			if r.binds() {
+				stmt, args, err = buildUpdateBound(be, pe.Table, pks, pe.Frame, pe.Row, pe.ColName, pe.NewValue)
+			} else {
+				stmt, err = buildUpdate(be, pe.Table, pks, pe.Frame, pe.Row, pe.ColName, pe.NewValue)
+			}
+			if err != nil {
+				return ErrorMsg{Err: err}
+			}
 			res, err := r.run(stmt, args)
 			if err != nil {
 				return cellSavedMsg{err: err}
@@ -367,24 +369,24 @@ func commitCellEdit(ctx AppContext, pe PendingEdit) tea.Cmd {
 func commitRowDelete(ctx AppContext, pd PendingDelete) tea.Cmd {
 	be := ctx.Backend()
 	if be != nil {
-		pks, err := be.PrimaryKeys(pd.Namespace, pd.Table)
-		if err != nil {
-			e := err
-			return func() tea.Msg { return ErrorMsg{Err: e} }
-		}
-		r := runnerFor(be)
-		var stmt string
-		var args []any
-		if r.binds() {
-			stmt, args, err = buildDeleteBound(be, pd.Table, pks, pd.Frame, pd.Rows)
-		} else {
-			stmt, err = buildDelete(be, pd.Table, pks, pd.Frame, pd.Rows)
-		}
-		if err != nil {
-			e := err
-			return func() tea.Msg { return ErrorMsg{Err: e} }
-		}
+		// Same closure discipline as commitCellEdit: the catalog read must not
+		// run inside the Update loop.
 		return func() tea.Msg {
+			pks, err := be.PrimaryKeys(pd.Namespace, pd.Table)
+			if err != nil {
+				return ErrorMsg{Err: err}
+			}
+			r := runnerFor(be)
+			var stmt string
+			var args []any
+			if r.binds() {
+				stmt, args, err = buildDeleteBound(be, pd.Table, pks, pd.Frame, pd.Rows)
+			} else {
+				stmt, err = buildDelete(be, pd.Table, pks, pd.Frame, pd.Rows)
+			}
+			if err != nil {
+				return ErrorMsg{Err: err}
+			}
 			res, err := r.run(stmt, args)
 			if err != nil {
 				return rowsDeletedMsg{err: err}

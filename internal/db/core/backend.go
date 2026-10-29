@@ -86,6 +86,13 @@ func (b *Backend) Run(stmt string) (db.Result, error) {
 	return b.RunBound(stmt, nil)
 }
 
+// adHocRowLimit caps one ad-hoc query's materialized rows. A bare
+// `SELECT *` used to append every row of the table into memory
+// (FrameFromResult); table fetches already cap at TableFetchLimit, the query
+// path had no ceiling at all. A visible truncation marker in the TUI is UI work (the frame shape
+// carries none); the cap itself is the same convention TableFetchLimit uses.
+const adHocRowLimit = 10000
+
 // RunBound is Run with bound parameters: values ride as driver arguments
 // (dbcore.ValueOf), never as concatenated text — the P0-4 rule.
 func (b *Backend) RunBound(stmt string, args []any) (db.Result, error) {
@@ -101,6 +108,9 @@ func (b *Backend) RunBound(stmt string, args []any) (db.Result, error) {
 	res, err := b.drv.Execute(ctx, stmt, vals...)
 	if err != nil {
 		return db.Result{}, err
+	}
+	if len(res.Rows) > adHocRowLimit {
+		res.Rows = res.Rows[:adHocRowLimit]
 	}
 	return b.result(res), nil
 }
