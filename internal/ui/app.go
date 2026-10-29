@@ -423,8 +423,13 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, tea.Batch(cmds...)
 
 	case tea.KeyPressMsg:
-		// ctrl+c always quits immediately, regardless of any overlay or mode.
+		// ctrl+c stops the statement in flight first: the query editor closes
+		// as soon as a statement is sent, so a running query has no other
+		// handle. With nothing in flight it quits, as before.
 		if m.String() == "ctrl+c" {
+			if c, ok := a.backend.(db.Canceler); ok && c.CancelRunning() {
+				return a, a.setToast("query canceled")
+			}
 			return a, tea.Quit
 		}
 		return a.handleKey(m)

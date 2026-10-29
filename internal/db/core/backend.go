@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/dbcore/dbcore"
@@ -51,11 +52,22 @@ type Backend struct {
 	drv    dbcore.SQLDriver
 	dbType string // sqltext spelling of Options.Kind
 	opt    Options
+
+	// runningCancel is the cancel handle of the statement in flight. Run and
+	// RunBound are fire-and-forget from tea.Cmd closures (no ctx travels with
+	// the call), so the registration lives here: a new statement overwrites
+	// it, and CancelRunning stops the most recent one. runningSeq tags the
+	// registration (CancelFunc itself is not comparable), so a statement
+	// finishing after its successor only clears its own registration.
+	runningMu     sync.Mutex
+	runningCancel context.CancelFunc
+	runningSeq    uint64
 }
 
 var (
 	_ db.Backend       = (*Backend)(nil)
 	_ db.BoundRunner   = (*Backend)(nil)
+	_ db.Canceler      = (*Backend)(nil)
 	_ db.TableTargeter = (*Backend)(nil)
 	_ db.Quoter        = (*Backend)(nil)
 	_ db.Escaper       = (*Backend)(nil)
@@ -104,7 +116,22 @@ func (b *Backend) RunBound(stmt string, args []any) (db.Result, error) {
 		vals[i] = dbcore.ValueOf(a)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), QueryTimeout)
-	defer cancel()
+	// Register before the round trip and clear after: ctrl+c resolves this
+	// handle when the user wants a long statement dead (the 30s deadline
+	// stays as the ceiling).
+	b.runningMu.Lock()
+	b.runningSeq++
+	seq := b.runningSeq
+	b.runningCancel = cancel
+	b.runningMu.Unlock()
+	defer func() {
+		b.runningMu.Lock()
+		if b.runningSeq == seq {
+			b.runningCancel = nil
+		}
+		b.runningMu.Unlock()
+		cancel()
+	}()
 	res, err := b.drv.Execute(ctx, stmt, vals...)
 	if err != nil {
 		return db.Result{}, err
@@ -113,6 +140,20 @@ func (b *Backend) RunBound(stmt string, args []any) (db.Result, error) {
 		res.Rows = res.Rows[:adHocRowLimit]
 	}
 	return b.result(res), nil
+}
+
+// CancelRunning stops the statement currently executing on this backend
+// (the most recent RunBound). False means nothing was in flight.
+func (b *Backend) CancelRunning() bool {
+	b.runningMu.Lock()
+	cancel := b.runningCancel
+	b.runningCancel = nil
+	b.runningMu.Unlock()
+	if cancel == nil {
+		return false
+	}
+	cancel()
+	return true
 }
 
 // result maps a kernel QueryResult onto the sqltui Result shape: a column

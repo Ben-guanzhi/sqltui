@@ -60,7 +60,12 @@ func (o *TableLoader) Update(msg tea.Msg) (Overlay, tea.Cmd) {
 	case tea.KeyPressMsg:
 		switch m.String() {
 		case "esc", "q", "ctrl+c":
-			// Abandon the view; a late result is dropped with the overlay.
+			// Abandon the view - and actually stop the fetch when the backend
+			// can cancel (a late result would be dropped with the overlay
+			// anyway, but the server-side work should not run on).
+			if c, ok := o.Be.(db.Canceler); ok {
+				c.CancelRunning()
+			}
 			return o, CloseOverlay
 		}
 	}

@@ -139,3 +139,13 @@ type Escaper interface {
 type BoundRunner interface {
 	RunBound(stmt string, args []any) (Result, error)
 }
+
+// Canceler is the optional ability to cancel the statement currently running
+// on this backend. Run/RunBound are fire-and-forget from tea.Cmd closures (no
+// ctx travels with the call), so a backend registers each statement's cancel
+// handle internally and this stops the most recent one. Returning false means
+// nothing was in flight - the UI uses that to decide between "canceled" and
+// quit.
+type Canceler interface {
+	CancelRunning() bool
+}
