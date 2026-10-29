@@ -149,3 +149,12 @@ type BoundRunner interface {
 type Canceler interface {
 	CancelRunning() bool
 }
+
+// NamespaceWarmer is the optional ability to resolve the connected namespace
+// ahead of time. The resolution is a single-row query (postgres's
+// current_schema()); the app warms it the moment a connection lands, so the
+// update loop's namespace lookups (delete confirmation, completion warm)
+// answer from the memo instead of blocking on a cold 30s round trip.
+type NamespaceWarmer interface {
+	WarmNamespace()
+}

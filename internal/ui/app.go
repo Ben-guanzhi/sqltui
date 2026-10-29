@@ -168,6 +168,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case SetBackendMsg:
+		var warm tea.Cmd
 		if m.Backend != nil && m.Backend != a.backend {
 			if a.backend != nil {
 				_ = a.backend.Close() // superseded: a reconnect replaces it
@@ -183,6 +184,15 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if onBackendChanged != nil {
 				onBackendChanged()
 			}
+			// Warm the namespace off the update loop: the delete-confirm and
+			// completion paths resolve it from the update loop, and on
+			// postgres a cold lookup is a real query (30s on a dead server).
+			if _, ok := a.backend.(db.NamespaceWarmer); ok {
+				warm = func() tea.Msg {
+					a.backend.(db.NamespaceWarmer).WarmNamespace()
+					return nil
+				}
+			}
 		}
 		if m.KV != nil && m.KV != a.kv {
 			if a.kv != nil {
@@ -190,7 +200,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			a.kv = m.KV
 		}
-		return a, nil
+		return a, warm
 
 	case deleteKeysReadyMsg:
 		a.pendingDelete = &PendingDelete{Frame: m.frame, Rows: m.rows, Table: m.table, Namespace: m.ns}

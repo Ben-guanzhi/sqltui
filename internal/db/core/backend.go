@@ -62,15 +62,23 @@ type Backend struct {
 	runningMu     sync.Mutex
 	runningCancel context.CancelFunc
 	runningSeq    uint64
+
+	// Namespace memo: CurrentNamespace answers update-loop calls (delete
+	// confirmation, completion warm) that must not block on a cold 30s
+	// round trip. WarmNamespace resolves once, off the update loop.
+	nsMu    sync.Mutex
+	nsDone  bool
+	nsValue string
 }
 
 var (
-	_ db.Backend       = (*Backend)(nil)
-	_ db.BoundRunner   = (*Backend)(nil)
-	_ db.Canceler      = (*Backend)(nil)
-	_ db.TableTargeter = (*Backend)(nil)
-	_ db.Quoter        = (*Backend)(nil)
-	_ db.Escaper       = (*Backend)(nil)
+	_ db.Backend         = (*Backend)(nil)
+	_ db.BoundRunner     = (*Backend)(nil)
+	_ db.Canceler        = (*Backend)(nil)
+	_ db.NamespaceWarmer = (*Backend)(nil)
+	_ db.TableTargeter   = (*Backend)(nil)
+	_ db.Quoter          = (*Backend)(nil)
+	_ db.Escaper         = (*Backend)(nil)
 )
 
 // New wraps a kernel SQL driver. The driver is owned by the Backend: Close
@@ -190,9 +198,42 @@ func (b *Backend) CurrentNamespace() string {
 	if b.opt.CurrentNS == nil {
 		return ""
 	}
+	b.nsMu.Lock()
+	v, done := b.nsValue, b.nsDone
+	b.nsMu.Unlock()
+	if done {
+		return v
+	}
+	// Cold: resolve synchronously and memo (the status quo). WarmNamespace at
+	// connection time makes this path near-unreachable.
 	ctx, cancel := context.WithTimeout(context.Background(), QueryTimeout)
 	defer cancel()
-	return b.opt.CurrentNS(ctx)
+	v = b.opt.CurrentNS(ctx)
+	b.nsMu.Lock()
+	b.nsValue, b.nsDone = v, true
+	b.nsMu.Unlock()
+	return v
+}
+
+// WarmNamespace resolves the connected namespace once. The app fires it when
+// the connection lands (a tea.Cmd goroutine), so the update loop's namespace
+// lookups answer from the memo instead of freezing on a cold query.
+func (b *Backend) WarmNamespace() {
+	if b.opt.CurrentNS == nil {
+		return
+	}
+	b.nsMu.Lock()
+	if b.nsDone {
+		b.nsMu.Unlock()
+		return
+	}
+	b.nsMu.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), QueryTimeout)
+	defer cancel()
+	v := b.opt.CurrentNS(ctx)
+	b.nsMu.Lock()
+	b.nsValue, b.nsDone = v, true
+	b.nsMu.Unlock()
 }
 
 // Tables lists the base tables of one namespace (views stay out of the tree,
