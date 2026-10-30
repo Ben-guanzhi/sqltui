@@ -119,11 +119,11 @@ func openobserveSummaryCols(f *data.Frame) []int {
 			return idxs
 		}
 	}
-	// Default: timestamp + body.
+	// Default: _timestamp + body.
 	timeIdx, bodyIdx := -1, -1
 	for i, c := range f.Columns {
 		switch c.Name {
-		case "timestamp":
+		case "_timestamp":
 			timeIdx = i
 		case "body":
 			bodyIdx = i

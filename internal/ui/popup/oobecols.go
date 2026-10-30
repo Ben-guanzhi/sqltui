@@ -21,11 +21,17 @@ func init() {
 		saved := config.ReadOobeSummaryColumns()
 		if len(saved) > 0 {
 			for _, c := range saved {
+				// The oobe frame's timestamp column was renamed to "_timestamp"
+				// (matching the stream's PK and raw hit key); migrate a saved
+				// "timestamp" so old configs keep working.
+				if c == "timestamp" {
+					c = "_timestamp"
+				}
 				selected[c] = true
 			}
 		} else {
-			// default: timestamp and body
-			selected["timestamp"] = true
+			// default: _timestamp and body
+			selected["_timestamp"] = true
 			selected["body"] = true
 		}
 		return &oobeColPicker{cols: cols, selected: selected, cursor: 0}, nil

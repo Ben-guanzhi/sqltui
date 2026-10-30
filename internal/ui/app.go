@@ -1568,6 +1568,9 @@ func (a *App) replaceBase(m ReplaceBaseMsg) tea.Cmd {
 		return nil
 	}
 	target.ReplaceBase(m.Frame)
+	// Re-seed the browse walk: the fresh frame is page 1 again, so the
+	// walk restarts from the top instead of continuing on a stale cursor.
+	a.seedBrowse(target)
 	return nil
 }
 

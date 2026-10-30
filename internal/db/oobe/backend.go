@@ -201,8 +201,10 @@ func buildFrame(metas []db.ColumnMeta, hits []map[string]any) *data.Frame {
 
 	names := make([]string, len(metas)+1)
 	types := make([]data.DType, len(metas)+1)
-	// index 0: timestamp — human-readable formatted time (no raw value)
-	names[0] = "timestamp"
+	// index 0: _timestamp — the stream's logical primary key (matches
+	// PrimaryKeys and the raw hit key; the cell holds the formatted time,
+	// which OpenObserve parses in UPDATE/DELETE WHERE clauses).
+	names[0] = "_timestamp"
 	types[0] = data.TypeString
 	for i, m := range metas {
 		names[i+1] = m.Name

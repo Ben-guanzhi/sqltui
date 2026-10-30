@@ -211,7 +211,13 @@ func (o *oobeSchemaOverlay) handleKey(msg tea.KeyPressMsg) (ui.Overlay, tea.Cmd)
 	key := msg.String()
 	switch key {
 	case "esc", "q":
-		return o, func() tea.Msg { return ui.RunCommandMsg{Name: "connect"} }
+		// Close the overlay first, then reconnect: without CloseOverlay the
+		// stack keeps this (stale) overlay and every esc->connect cycle leaks
+		// one more entry pointing at the old backend.
+		return o, tea.Sequence(
+			ui.CloseOverlay,
+			func() tea.Msg { return ui.RunCommandMsg{Name: "connect"} },
+		)
 	case "up", "k":
 		o.state.Cursor = ui.NextSelectable(rows, o.state.Cursor, -1, oobeRow.selectable)
 		o.edgeFollow(rows)
