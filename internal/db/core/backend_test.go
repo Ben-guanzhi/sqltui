@@ -15,15 +15,12 @@ import (
 // (delete confirmation, completion warm) never block on a cold 30s round
 // trip — on postgres a cold lookup is a real query.
 func TestCurrentNamespaceMemoizes(t *testing.T) {
-	var calls atomic.Int64
 	b := New(nil, Options{
 		Kind: "postgresql",
 		CurrentNS: func(context.Context) string {
 			return "public"
 		},
 	})
-	_ = calls
-
 	if _, ok := db.Backend(b).(db.NamespaceWarmer); !ok {
 		t.Fatal("Backend must implement db.NamespaceWarmer")
 	}
