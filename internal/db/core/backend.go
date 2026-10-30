@@ -72,6 +72,7 @@ var (
 	_ db.BoundRunner     = (*Backend)(nil)
 	_ db.Canceler        = (*Backend)(nil)
 	_ db.NamespaceWarmer = (*Backend)(nil)
+	_ db.BrowseBackend   = (*Backend)(nil)
 	_ db.TableTargeter   = (*Backend)(nil)
 	_ db.Quoter          = (*Backend)(nil)
 	_ db.Escaper         = (*Backend)(nil)
@@ -265,6 +266,113 @@ func (b *Backend) FetchTable(namespace, table string, limit int) (*data.Frame, e
 		return nil, err
 	}
 	return FrameFromResult(res), nil
+}
+
+// browsePageDefault is the window size when the caller passes no Limit.
+const browsePageDefault = 200
+
+// BrowsePage loads one window of a table's rows past the first page: keyset
+// continuation when the table has a single sort key (default: its single
+// primary key), OFFSET otherwise. The cursor values are typed against the
+// sort column so a text cursor on an integer column cannot fail an engine's
+// operator type check.
+func (b *Backend) BrowsePage(ctx context.Context, namespace, table string, req *db.BrowsePageRequest) (*db.BrowsePageResult, error) {
+	if req == nil {
+		return nil, fmt.Errorf("browse: request required")
+	}
+	limit := req.Limit
+	if limit <= 0 {
+		limit = browsePageDefault
+	}
+
+	cols, err := b.drv.ListColumns(ctx, namespace, table)
+	if err != nil {
+		return nil, err
+	}
+	// The keyset anchor: a single primary key is the natural continuation.
+	var sortKey *dbcore.SortKey
+	pkCount := 0
+	for _, c := range cols {
+		if !c.IsPrimaryKey {
+			continue
+		}
+		pkCount++
+		if pkCount == 1 {
+			sortKey = &dbcore.SortKey{Column: c.Name}
+		}
+	}
+
+	rreq := &dbcore.TableRowsRequest{Page: req.Page, PageSize: limit}
+	if sortKey != nil {
+		rreq.Sort = []dbcore.SortKey{*sortKey}
+		if req.After != nil {
+			colType := ""
+			for _, c := range cols {
+				if c.Name == sortKey.Column {
+					colType = c.Type
+					break
+				}
+			}
+			rreq.After = cursorValues(colType, req.After)
+		}
+	}
+
+	res, err := b.drv.BrowseRows(ctx, namespace, table, rreq)
+	if err != nil {
+		return nil, err
+	}
+	qr := &dbcore.QueryResult{Columns: res.Columns, Rows: res.Rows}
+	sortCol := ""
+	if sortKey != nil {
+		sortCol = sortKey.Column
+	}
+	return &db.BrowsePageResult{Frame: FrameFromResult(qr), Total: res.Total, TotalFound: res.TotalFound, SortColumn: sortCol}, nil
+}
+
+// cursorValues types each string cursor against the sort column's declared
+// type so it binds correctly in every engine.
+func cursorValues(colType string, vals []string) []dbcore.Value {
+	out := make([]dbcore.Value, len(vals))
+	for i, v := range vals {
+		switch classifyCursorType(colType) {
+		case cursorInt:
+			if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+				out[i] = dbcore.Value{Kind: dbcore.ValInt, I: n}
+				continue
+			}
+		case cursorFloat:
+			if f, err := strconv.ParseFloat(v, 64); err == nil {
+				out[i] = dbcore.Value{Kind: dbcore.ValFloat, F: f}
+				continue
+			}
+		}
+		out[i] = dbcore.Value{Kind: dbcore.ValText, S: v}
+	}
+	return out
+}
+
+type cursorClass int
+
+const (
+	cursorInt   cursorClass = iota
+	cursorFloat cursorClass = iota
+)
+
+// classifyCursorType folds the engines' spellings onto two numeric classes;
+// anything else (and any cursor that fails to parse) rides as text.
+func classifyCursorType(colType string) cursorClass {
+	upper := strings.ToUpper(colType)
+	for _, t := range []string{"INT", "INT2", "INT4", "INT8", "BIGINT", "SMALLINT", "TINYINT", "MEDIUMINT"} {
+		if strings.Contains(upper, t) {
+			return cursorInt
+		}
+	}
+	for _, t := range []string{"REAL", "FLOAT", "DOUBLE", "NUMERIC", "DECIMAL"} {
+		if strings.Contains(upper, t) {
+			return cursorFloat
+		}
+	}
+	return 0
 }
 
 // PrimaryKeys lists the primary-key column names of namespace.table in

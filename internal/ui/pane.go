@@ -86,6 +86,16 @@ func (p *Pane) Current() *data.Frame {
 	return p.stack[len(p.stack)-1].frame
 }
 
+// Base returns the pane's base frame (stack[0]; nil for an empty pane).
+// Operations pushed on top (filters, aggregates) never change it, so it is
+// the frame page-window rows belong to.
+func (p *Pane) Base() *data.Frame {
+	if len(p.stack) == 0 {
+		return nil
+	}
+	return p.stack[0].frame
+}
+
 // Depth reports the stack depth.
 func (p *Pane) Depth() int { return len(p.stack) }
 

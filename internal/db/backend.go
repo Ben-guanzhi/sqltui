@@ -3,6 +3,8 @@
 package db
 
 import (
+	"context"
+
 	"github.com/LinPr/sqltui/internal/data"
 )
 
@@ -157,4 +159,34 @@ type Canceler interface {
 // answer from the memo instead of blocking on a cold 30s round trip.
 type NamespaceWarmer interface {
 	WarmNamespace()
+}
+
+// BrowseBackend is the optional ability to load a table's rows past the first
+// window: BrowsePage continues a keyset walk (a single sort key, defaulting to
+// the table's single primary key) or falls back to OFFSET paging when there
+// is no usable sort key. Page 1 comes through the ordinary FetchTable; this
+// is the continuation a "next page" key uses.
+type BrowseBackend interface {
+	BrowsePage(ctx context.Context, namespace, table string, req *BrowsePageRequest) (*BrowsePageResult, error)
+}
+
+// BrowsePageResult is one window of a table plus everything the caller needs
+// to continue it: the total (when actually read), and the keyset anchor
+// column ("" means OFFSET mode, so the next window uses Page instead of After).
+type BrowsePageResult struct {
+	Frame      *data.Frame
+	Total      uint64
+	TotalFound bool
+	SortColumn string
+}
+
+// BrowsePageRequest selects one window of a table's rows.
+type BrowsePageRequest struct {
+	// Page is 1-based and used in OFFSET mode (no single sort key).
+	Page int
+	// After continues a keyset walk: the values of the sort column at the end
+	// of the previous window. It wins over Page when a sort key exists.
+	After []string
+	// Limit caps the window.
+	Limit int
 }

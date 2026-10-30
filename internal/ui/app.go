@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"context"
 	"fmt"
 	"runtime/debug"
 	"strings"
@@ -18,6 +19,10 @@ import (
 )
 
 const toastDuration = 2500 * time.Millisecond
+
+// browsePageTimeout is the ceiling of one "next page" fetch, matching the
+// kernel statement timeout.
+const browsePageTimeout = 30 * time.Second
 
 // Options configures a new App.
 type Options struct {
@@ -68,6 +73,25 @@ type App struct {
 
 	// syncedFrame caches the frame last registered as "_" (see ensureSynced).
 	syncedFrame *data.Frame
+
+	// browse remembers where each table tab's row window ends, so the "next
+	// page" key continues the window instead of re-fetching the first one.
+	browse map[string]*browseState
+}
+
+// browseState tracks one table tab's loaded window and the cursor that
+// continues it.
+type browseState struct {
+	ns         string
+	table      string
+	paneID     int
+	page       int      // OFFSET page (1-based)
+	after      []string // keyset cursor at the end of the last window
+	sortColumn string   // "" = OFFSET mode
+	loaded     int
+	total      uint64
+	totalFound bool
+	done       bool // the last window was short
 }
 
 // toastExpiredMsg clears a toast after its timer fires.
@@ -90,6 +114,7 @@ func New(opts Options) *App {
 		backend:        opts.Backend,
 		kv:             opts.KV,
 		schemaC:        &schemaCache{},
+		browse:         map[string]*browseState{},
 		width:          80,
 		height:         24,
 	}
@@ -227,6 +252,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case ApplyFrameMsg:
 		return a, a.applyFrame(m)
+
+	case BrowsePageMsg:
+		return a, a.browsePageApplied(m)
 
 	case ReplaceBaseMsg:
 		return a, a.replaceBase(m)
@@ -1029,6 +1057,25 @@ func (a *App) dispatch(action, key string) tea.Cmd {
 				oobe.SetPage(oobe.GetPage() + 1)
 				return a.runCommand("refreshtable", "")
 			}
+			// SQL tables: load the next window (keyset when the table has a
+			// single sort key, OFFSET otherwise) instead of re-fetching.
+			if bb, ok := a.backend.(db.BrowseBackend); ok {
+				if st := a.activeBrowse(); st != nil && !st.done {
+					req := &db.BrowsePageRequest{
+						After: st.after,
+						Page:  st.page + 1,
+						Limit: TableFetchLimit,
+					}
+					st := st
+					ctx, cancel := context.WithTimeout(context.Background(), browsePageTimeout)
+					defer cancel()
+					return func() tea.Msg {
+						res, err := bb.BrowsePage(ctx, st.ns, st.table, req)
+						return BrowsePageMsg{st: st, res: res, err: err}
+					}
+				}
+				return a.setToast("已是最后一页")
+			}
 		}
 		return nil
 	case ActPrevPage:
@@ -1409,6 +1456,7 @@ func (a *App) applyFrame(m ApplyFrameMsg) tea.Cmd {
 		p.sourceNS, p.sourceTable = m.SourceNamespace, m.SourceTable
 		a.tabs = append(a.tabs, p)
 		a.active = len(a.tabs) - 1
+		a.seedBrowse(p)
 	} else {
 		crumb := m.Crumb
 		if crumb == "" {
@@ -1417,6 +1465,93 @@ func (a *App) applyFrame(m ApplyFrameMsg) tea.Cmd {
 		target.Push(m.Frame, crumb)
 	}
 	return nil
+}
+
+// seedBrowse records where a table tab's window stands. The refresh path
+// (ReplaceBaseMsg) re-seeds so a mid-walk refresh starts over at page 1.
+func (a *App) seedBrowse(p *Pane) {
+	if p.sourceNS == "" || p.sourceTable == "" {
+		return
+	}
+	key := p.sourceNS + "|" + p.sourceTable
+	base := p.Base()
+	if base == nil {
+		return
+	}
+	state := &browseState{
+		ns:     p.sourceNS,
+		table:  p.sourceTable,
+		paneID: p.ID(),
+		page:   1,
+		loaded: base.NumRows(),
+	}
+	a.browse[key] = state
+}
+
+// activeBrowse is the browse state of the active tab's table, or nil when the
+// active tab is not a table or has no window yet.
+func (a *App) activeBrowse() *browseState {
+	p := a.pane()
+	if p == nil || p.sourceNS == "" || p.sourceTable == "" {
+		return nil
+	}
+	return a.browse[p.sourceNS+"|"+p.sourceTable]
+}
+
+// BrowsePageMsg carries one "next page" window back to the pane it was
+// requested for.
+type BrowsePageMsg struct {
+	st  *browseState
+	res *db.BrowsePageResult
+	err error
+}
+
+// browsePageApplied lands a BrowsePageMsg: append the window to the pane's
+// frame, update the cursor and the window bounds, and report the page.
+func (a *App) browsePageApplied(m BrowsePageMsg) tea.Cmd {
+	if m.err != nil {
+		return a.setToast("加载下一页失败：" + m.err.Error())
+	}
+	st, res := m.st, m.res
+	p := a.paneByID(st.paneID)
+	if p == nil || res == nil || res.Frame == nil {
+		return nil // the tab closed while the window was in flight
+	}
+	base := p.Base()
+	if base == nil {
+		return nil
+	}
+	window := res.Frame
+	for i := 0; i < window.NumRows(); i++ {
+		base.AppendRow(window.Row(i))
+	}
+	// The cursor continues the window: the sort column's value at the end
+	// (keyset), or the OFFSET page (no sort key).
+	if res.SortColumn != "" {
+		col := window.ColumnIndex(res.SortColumn)
+		last := window.Row(window.NumRows() - 1)
+		if col >= 0 {
+			st.after = []string{fmt.Sprint(last[col])}
+			st.sortColumn = res.SortColumn
+		}
+	} else {
+		st.page++
+		st.after = nil
+	}
+	st.loaded += window.NumRows()
+	if res.TotalFound {
+		st.total, st.totalFound = res.Total, true
+	}
+	st.done = window.NumRows() < TableFetchLimit
+
+	status := fmt.Sprintf("第 %d 页 · 已加载 %d 行", st.page, st.loaded)
+	if st.totalFound {
+		status += fmt.Sprintf(" · 共 %d 行", st.total)
+	}
+	if st.done {
+		status += "（已到最后一页）"
+	}
+	return a.setToast(status)
 }
 
 // replaceBase handles ReplaceBaseMsg: swap the base frame of the target pane

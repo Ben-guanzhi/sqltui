@@ -103,3 +103,69 @@ func TestCancelRunningStopsStatement(t *testing.T) {
 		t.Fatal("a second cancel must find nothing in flight")
 	}
 }
+
+// 表浏览翻页：单键 keyset 续读（游标类型化）+ 无单键 OFFSET 降级 + Total。
+func TestBrowsePage(t *testing.T) {
+	ctx := context.Background()
+	drv, err := dbcoresqlite.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := New(drv, Options{Kind: "sqlite", Title: "browse"})
+
+	b.Run("CREATE TABLE pk(id INTEGER PRIMARY KEY, name TEXT)")
+	b.Run("CREATE TABLE pkless(name TEXT)")
+	seed := "WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM n WHERE x < 300) "
+	if _, err := b.Run(seed + "INSERT INTO pk(id,name) SELECT x, 'row'||x FROM n"); err != nil {
+		t.Fatalf("seed pk table: %v", err)
+	}
+
+	// Page 1: the first window.
+	res, err := b.BrowsePage(ctx, "main", "pk", &db.BrowsePageRequest{Limit: 200})
+	frame, total, found := res.Frame, res.Total, res.TotalFound
+	if res.SortColumn != "id" {
+		t.Fatalf("sort column = %q, want id", res.SortColumn)
+	}
+	if err != nil {
+		t.Fatalf("page 1: %v", err)
+	}
+	if frame.NumRows() != 200 || total != 300 || !found {
+		t.Fatalf("page 1 = %d rows total=%d found=%v", frame.NumRows(), total, found)
+	}
+	// The cursor: the sort column (single PK) of the last row, as text.
+	lastID, ok := frame.Cell(199, 0).(int64)
+	if !ok || lastID != 200 {
+		t.Fatalf("last pk = %#v, want 200", frame.Cell(199, 0))
+	}
+
+	// Page 2: keyset continuation from the cursor.
+	res2, err := b.BrowsePage(ctx, "main", "pk", &db.BrowsePageRequest{After: []string{"200"}, Limit: 200})
+	frame2 := res2.Frame
+	if err != nil {
+		t.Fatalf("page 2: %v", err)
+	}
+	if frame2.NumRows() != 100 {
+		t.Fatalf("page 2 = %d rows, want 100", frame2.NumRows())
+	}
+	if id, _ := frame2.Cell(0, 0).(int64); id != 201 {
+		t.Fatalf("page 2 first pk = %v, want 201", frame2.Cell(0, 0))
+	}
+
+	// A table without a single sort key degrades to OFFSET: Page=2 skips
+	// the first window instead of keyset-walking.
+
+	if _, err := b.Run(seed + "INSERT INTO pkless(name) SELECT 'row'||x FROM n"); err != nil {
+		t.Fatal(err)
+	}
+	res3, err := b.BrowsePage(ctx, "main", "pkless", &db.BrowsePageRequest{Page: 2, Limit: 200})
+	frame3 := res3.Frame
+	if res3.SortColumn != "" {
+		t.Fatalf("no single PK must mean OFFSET (sort column %q)", res3.SortColumn)
+	}
+	if err != nil {
+		t.Fatalf("page 2 offset: %v", err)
+	}
+	if frame3.NumRows() != 100 {
+		t.Fatalf("offset page 2 = %d rows, want 100", frame3.NumRows())
+	}
+}
