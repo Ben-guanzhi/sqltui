@@ -53,15 +53,11 @@ type Backend struct {
 	dbType string // sqltext spelling of Options.Kind
 	opt    Options
 
-	// runningCancel is the cancel handle of the statement in flight. Run and
-	// RunBound are fire-and-forget from tea.Cmd closures (no ctx travels with
-	// the call), so the registration lives here: a new statement overwrites
-	// it, and CancelRunning stops the most recent one. runningSeq tags the
-	// registration (CancelFunc itself is not comparable), so a statement
-	// finishing after its successor only clears its own registration.
-	runningMu     sync.Mutex
-	runningCancel context.CancelFunc
-	runningSeq    uint64
+	// cancelReg tracks the statement in flight. Run and RunBound are
+	// fire-and-forget from tea.Cmd closures (no ctx travels with the call),
+	// so the registration lives here: a new statement overwrites it, and
+	// CancelRunning stops the most recent one.
+	cancelReg db.CancelRegistry
 
 	// Namespace memo: CurrentNamespace answers update-loop calls (delete
 	// confirmation, completion warm) that must not block on a cold 30s
@@ -127,19 +123,8 @@ func (b *Backend) RunBound(stmt string, args []any) (db.Result, error) {
 	// Register before the round trip and clear after: ctrl+c resolves this
 	// handle when the user wants a long statement dead (the 30s deadline
 	// stays as the ceiling).
-	b.runningMu.Lock()
-	b.runningSeq++
-	seq := b.runningSeq
-	b.runningCancel = cancel
-	b.runningMu.Unlock()
-	defer func() {
-		b.runningMu.Lock()
-		if b.runningSeq == seq {
-			b.runningCancel = nil
-		}
-		b.runningMu.Unlock()
-		cancel()
-	}()
+	clear := b.cancelReg.Track(cancel)
+	defer clear()
 	res, err := b.drv.Execute(ctx, stmt, vals...)
 	if err != nil {
 		return db.Result{}, err
@@ -153,15 +138,18 @@ func (b *Backend) RunBound(stmt string, args []any) (db.Result, error) {
 // CancelRunning stops the statement currently executing on this backend
 // (the most recent RunBound). False means nothing was in flight.
 func (b *Backend) CancelRunning() bool {
-	b.runningMu.Lock()
-	cancel := b.runningCancel
-	b.runningCancel = nil
-	b.runningMu.Unlock()
-	if cancel == nil {
-		return false
-	}
-	cancel()
-	return true
+	return b.cancelReg.CancelRunning()
+}
+
+// RunQuery executes run with a fresh 30s timeout ctx whose cancel joins the
+// same registry CancelRunning reads. sqlserverbe's own catalog path builds
+// its ctx (it addresses cross-database targets RunBound can't spell), so it
+// needs the registration without the statement routing.
+func (b *Backend) RunQuery(ctx context.Context, run func(context.Context) (*dbcore.QueryResult, error)) (*dbcore.QueryResult, error) {
+	ctx, cancel := context.WithTimeout(ctx, QueryTimeout)
+	clear := b.cancelReg.Track(cancel)
+	defer clear()
+	return run(ctx)
 }
 
 // result maps a kernel QueryResult onto the sqltui Result shape: a column

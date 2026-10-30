@@ -258,9 +258,11 @@ func (b *Backend) ColumnIndexTypes(namespace, table string) (map[string]string, 
 // only the [db].dbo.[table] target spelling is engine-local.
 
 func (b *Backend) query(sql string, args ...dbcore.Value) (*dbcore.QueryResult, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), core.QueryTimeout)
-	defer cancel()
-	return b.drv.Execute(ctx, sql, args...)
+	// Cross-database catalog targets RunBound can't spell: same 30s ceiling,
+	// but the cancel handle joins the shared registry so ctrl+c reaches it.
+	return b.RunQuery(context.Background(), func(ctx context.Context) (*dbcore.QueryResult, error) {
+		return b.drv.Execute(ctx, sql, args...)
+	})
 }
 
 // textArg wraps s as a bound kernel parameter.

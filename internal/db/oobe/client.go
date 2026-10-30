@@ -2,6 +2,7 @@ package oobe
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -79,12 +80,14 @@ func (c *httpClient) getJSON(path string, out any) error {
 	return json.NewDecoder(resp.Body).Decode(out)
 }
 
-func (c *httpClient) postSSE(path string, body any) (io.ReadCloser, error) {
+func (c *httpClient) postSSE(ctx context.Context, path string, body any) (io.ReadCloser, error) {
 	b, err := json.Marshal(body)
 	if err != nil {
 		return nil, err
 	}
-	req, err := http.NewRequest(http.MethodPost, c.base+path, bytes.NewReader(b))
+	// NewRequestWithContext: cancelling the request ctx closes the stream —
+	// the only lever a deadline-less SSE read has.
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.base+path, bytes.NewReader(b))
 	if err != nil {
 		return nil, err
 	}

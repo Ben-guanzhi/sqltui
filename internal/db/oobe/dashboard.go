@@ -189,7 +189,9 @@ func (b *Backend) QueryPanel(ctx PanelQueryContext) ([]map[string]any, error) {
 			"size":       -1,
 		},
 	}
-	rc, err := b.client.postSSE(path, body)
+	reqCtx, done := b.requestCtx()
+	defer done()
+	rc, err := b.client.postSSE(reqCtx, path, body)
 	if err != nil {
 		return nil, fmt.Errorf("query panel: %w", err)
 	}

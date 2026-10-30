@@ -1,6 +1,7 @@
 package oobe
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"strconv"
@@ -29,6 +30,11 @@ type Backend struct {
 	pageSize  int   // rows per page, default 200
 	startUS   int64 // cached query window start (microseconds); 0 = not yet initialized
 	endUS     int64 // cached query window end (microseconds)
+
+	// cancelReg tracks the SSE request in flight: a search streams until the
+	// server sends [[DONE]] and has no deadline of its own, so esc/ctrl+c is
+	// the only way to stop one — which is exactly what CancelRunning does.
+	cancelReg db.CancelRegistry
 }
 
 var (
@@ -266,7 +272,9 @@ func cellValue(v any, t data.DType) any {
 func (b *Backend) sseSearch(namespace, sql string, limit int, startUS, endUS int64) ([]map[string]any, error) {
 	path := fmt.Sprintf("/api/%s/_search_stream?type=logs&search_type=ui&use_cache=true", namespace)
 	body := buildSearchBody(sql, limit, startUS, endUS)
-	rc, err := b.client.postSSE(path, body)
+	ctx, done := b.requestCtx()
+	defer done()
+	rc, err := b.client.postSSE(ctx, path, body)
 	if err != nil {
 		return nil, err
 	}
@@ -298,7 +306,10 @@ func (b *Backend) FetchTable(namespace, table string, limit int) (*data.Frame, e
 
 	sql := "SELECT * FROM " + b.TableTarget(namespace, table) + " ORDER BY _timestamp DESC"
 	body := buildSearchBodyWithOffset(sql, b.pageSize, offset, startUS, endUS)
+	ctx, done := b.requestCtx()
+	defer done()
 	rc, err := b.client.postSSE(
+		ctx,
 		fmt.Sprintf("/api/%s/_search_stream?type=logs&search_type=ui&use_cache=true", namespace),
 		body,
 	)
@@ -341,3 +352,17 @@ func (b *Backend) ColumnIndexTypes(namespace, table string) (map[string]string, 
 
 // Close is a no-op; the HTTP client has no persistent connections to release.
 func (b *Backend) Close() error { return nil }
+
+// requestCtx hands out a ctx wired to the cancel registry for one HTTP
+// request; the returned done clears the registration and cancels.
+func (b *Backend) requestCtx() (context.Context, func()) {
+	ctx, cancel := context.WithCancel(context.Background())
+	clear := b.cancelReg.Track(cancel)
+	return ctx, clear
+}
+
+// CancelRunning stops the SSE request in flight (a search has no deadline:
+// it streams until the server sends [[DONE]], so esc is the only stop).
+func (b *Backend) CancelRunning() bool {
+	return b.cancelReg.CancelRunning()
+}

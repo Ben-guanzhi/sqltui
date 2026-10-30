@@ -79,9 +79,17 @@ type Backend struct {
 	typed   dbcore.TypedCommander
 	addr    string
 	rdbNum  int
+
+	// cancelReg tracks the request in flight (Do / ScanKeys / Value): the
+	// scan loop is the most cancellable redis path (up to 1000 rounds), and
+	// ctrl+c should stop it rather than let it run to the cap.
+	cancelReg db.CancelRegistry
 }
 
-var _ db.KVBackend = (*Backend)(nil)
+var (
+	_ db.KVBackend = (*Backend)(nil)
+	_ db.Canceler  = (*Backend)(nil)
+)
 
 // Connect opens a redis connection through the kernel and pings it before
 // returning.
@@ -126,7 +134,7 @@ func (b *Backend) Do(args []string) (string, error) {
 		return "", fmt.Errorf("empty command")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), queryTimeout)
-	defer cancel()
+	defer b.cancelReg.Track(cancel)()
 	if b.typed != nil {
 		reply, err := b.typed.ExecCommandTyped(ctx, args)
 		if err != nil {
@@ -152,7 +160,9 @@ func (b *Backend) Do(args []string) (string, error) {
 // per-key TYPE round trip.
 func (b *Backend) ScanKeys(keyType string) ([]string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), queryTimeout)
-	defer cancel()
+	// The scan loop is the one redis path that can legitimately run long:
+	// cancelling the ctx aborts the in-flight round and the loop exits.
+	defer b.cancelReg.Track(cancel)()
 	want := dbcore.RedisKeyType(keyType)
 	keys := make([]string, 0, 64)
 	if b.scanner != nil {
@@ -209,7 +219,7 @@ func (b *Backend) ScanKeys(keyType string) ([]string, error) {
 // client rendered a map, whose order was Go's key sort).
 func (b *Backend) Value(key string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), queryTimeout)
-	defer cancel()
+	defer b.cancelReg.Track(cancel)()
 	v, err := b.kv.GetValue(ctx, key)
 	if err != nil {
 		// The kernel reports a missing key as an error; the browser shows the
@@ -296,4 +306,10 @@ func FormatJSON(a any) (string, error) {
 		return "", err
 	}
 	return string(j), nil
+}
+
+// CancelRunning stops the redis request currently in flight (the most recent
+// Do / ScanKeys / Value). False means nothing was in flight.
+func (b *Backend) CancelRunning() bool {
+	return b.cancelReg.CancelRunning()
 }
