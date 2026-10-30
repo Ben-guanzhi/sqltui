@@ -258,9 +258,23 @@ func (b *Backend) FetchTable(namespace, table string, limit int) (*data.Frame, e
 	} else if limit > 10000 {
 		limit = 10000
 	}
-	query := sqltext.RowLimit(b.dbType, "SELECT * FROM "+b.opt.Target(namespace, table), limit)
+	// Resolve the single PK for ORDER BY: page 1 must be ordered the same
+	// way as pages 2+ (BrowsePage sorts by the same key) so rows appended
+	// across pages don't duplicate or skip.
 	ctx, cancel := context.WithTimeout(context.Background(), QueryTimeout)
 	defer cancel()
+	cols, err := b.drv.ListColumns(ctx, namespace, table)
+	if err != nil {
+		return nil, err
+	}
+	selectSQL := "SELECT * FROM " + b.opt.Target(namespace, table)
+	for _, c := range cols {
+		if c.IsPrimaryKey {
+			selectSQL += " ORDER BY " + QuoteIdent(b.dbType, c.Name)
+			break
+		}
+	}
+	query := sqltext.RowLimit(b.dbType, selectSQL, limit)
 	res, err := b.drv.Execute(ctx, query)
 	if err != nil {
 		return nil, err

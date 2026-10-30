@@ -145,3 +145,65 @@ func TestBrowsePagingNoBackendIsNoop(t *testing.T) {
 		t.Fatalf("ActNextPage with a non-browse backend returned a command, want nil")
 	}
 }
+
+// emptyBrowseBackend returns rows on the first page and an empty window on
+// every subsequent page — the exhaustion case.
+type emptyBrowseBackend struct {
+	fakeBackend
+	calls int
+}
+
+func (e *emptyBrowseBackend) BrowsePage(_ context.Context, _, _ string, req *db.BrowsePageRequest) (*db.BrowsePageResult, error) {
+	e.calls++
+	if req.Page == 1 {
+		frame := data.New("id", "name", "comment")
+		frame.AppendRow([]any{"1", "alice", "c"})
+		return &db.BrowsePageResult{Frame: frame, Total: 1, TotalFound: true, SortColumn: "id"}, nil
+	}
+	// Empty window: the walk is exhausted.
+	return &db.BrowsePageResult{Frame: data.New("id", "name", "comment"), Total: 1, TotalFound: true, SortColumn: "id"}, nil
+}
+
+// TestBrowsePagingEmptyWindowExhausts pins that an empty window marks the
+// walk done and returns a "已是最后一页" toast instead of panicking on
+// Row(-1). Pre-fix, browsePageApplied accessed window.Row(NumRows()-1)
+// unconditionally, crashing when the window had zero rows.
+func TestBrowsePagingEmptyWindowExhausts(t *testing.T) {
+	bb := &emptyBrowseBackend{}
+	a := New(Options{
+		Frames:  []reader.NamedFrame{{Name: "t", Frame: testFrame(1)}},
+		Backend: bb,
+	})
+	a.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	a.Update(ApplyFrameMsg{
+		Frame:           testFrame(1),
+		NewTab:          true,
+		TabTitle:        "orders",
+		SourceNamespace: "sales",
+		SourceTable:     "orders",
+	})
+
+	// Page 2 returns an empty window.
+	_, cmd := a.Update(key(">"))
+	if cmd == nil {
+		t.Fatal("ActNextPage returned no command")
+	}
+	msg := cmd()
+	pm, ok := msg.(BrowsePageMsg)
+	if !ok {
+		t.Fatalf("cmd returned %T, want BrowsePageMsg", msg)
+	}
+
+	// Applying the empty window must not panic and must mark done.
+	// setToast returns a tea.Tick cmd (blocks when called), so we verify
+	// the command is non-nil without executing it.
+	_, toastCmd := a.Update(pm)
+	if toastCmd == nil {
+		t.Fatal("browsePageApplied returned no toast command for empty window")
+	}
+
+	st := a.activeBrowse()
+	if !st.done {
+		t.Fatal("walk not marked done after empty window")
+	}
+}

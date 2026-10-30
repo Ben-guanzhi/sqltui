@@ -1527,6 +1527,12 @@ func (a *App) browsePageApplied(m BrowsePageMsg) tea.Cmd {
 	}
 	// The cursor continues the window: the sort column's value at the end
 	// (keyset), or the OFFSET page (no sort key).
+	if window.NumRows() == 0 {
+		// An empty window means the walk is exhausted: mark done so the
+		// next ">" reports "已是最后一页" instead of fetching again.
+		st.done = true
+		return a.setToast("已是最后一页")
+	}
 	if res.SortColumn != "" {
 		col := window.ColumnIndex(res.SortColumn)
 		last := window.Row(window.NumRows() - 1)
