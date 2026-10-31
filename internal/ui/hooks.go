@@ -19,7 +19,6 @@ type TabInfo struct {
 type AppContext interface {
 	CurrentFrame() *data.Frame // top of current pane stack (nil if no tabs)
 	CurrentRow() int           // selected row in current table view
-	SheetFieldCursor() int     // selected field in sheet mode
 	CurrentTableNamespace() string
 	BaseCrumb() string // current tab title
 	Crumbs() []string  // full breadcrumb chain

@@ -22,8 +22,9 @@ func init() {
 		}
 		return p, nil
 	}
+	// 单一注册名 "queryparams"：曾经的 "timerange" 别名从未被调用
+	// （app.go 只调 "queryparams"），留着会误导读者以为有两个入口。
 	ui.Factories["queryparams"] = f
-	ui.Factories["timerange"] = f
 }
 
 type trOption struct {

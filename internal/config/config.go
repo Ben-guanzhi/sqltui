@@ -413,11 +413,16 @@ func SetDefaultLog() error {
 }
 
 // updateSection reads the full config, applies fn to mutate it, then writes it back.
+// A file that does not parse aborts the write instead of being silently
+// replaced: Unmarshal leaves cfg zero for the sections it could not read,
+// and writing that back would wipe every stored credential.
 func updateSection(fn func(*SqlConfig)) error {
 	var cfg SqlConfig
 	data, err := os.ReadFile(ConfigFile)
 	if err == nil {
-		_ = yaml.Unmarshal(data, &cfg)
+		if err := yaml.Unmarshal(data, &cfg); err != nil {
+			return fmt.Errorf("config %s 无法解析，拒绝覆盖写入（请先手工修复）: %w", ConfigFile, err)
+		}
 	}
 	fn(&cfg)
 	out, err := yaml.Marshal(&cfg)

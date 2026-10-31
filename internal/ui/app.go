@@ -312,32 +312,6 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, tea.ExecProcess(m.Cmd, tea.ExecCallback(m.OnDone))
 
-	case CopyTextMsg:
-		return a, tea.Batch(tea.SetClipboard(m.Text), a.setToast("copied to clipboard"))
-
-	case SetTimeRangeMsg:
-		// Set time range on OpenObserve backend and trigger refresh
-		if a.backend != nil {
-			if oobe, ok := a.backend.(db.TimeRanger); ok {
-				oobe.SetTimeRange(m.Minutes)
-				return a, tea.Batch(
-					a.runCommand("refreshtable", ""),
-					a.setToast(fmt.Sprintf("time range: %d min", m.Minutes)),
-				)
-			}
-		}
-		return a, nil
-
-	case SetPageMsg:
-		// Set page on OpenObserve backend and trigger refresh
-		if a.backend != nil {
-			if oobe, ok := a.backend.(db.Paged); ok {
-				oobe.SetPage(m.Page)
-				return a, a.runCommand("refreshtable", "")
-			}
-		}
-		return a, nil
-
 	case OobeColsSelectedMsg:
 		if p := a.pane(); p != nil && a.backend != nil {
 			f := p.Current()
@@ -1096,7 +1070,18 @@ func (a *App) dispatch(action, key string) tea.Cmd {
 					oobe.SetPage(oobe.GetPage() - 1)
 					return a.runCommand("refreshtable", "")
 				}
+				return a.setToast("已是第一页")
 			}
+			// SQL 表：已加载的窗口行都在 base frame 里，< 就地把光标上移
+			// 一窗（与 > 的服务端续读对称）；已在顶时如实反馈，不再静默。
+			if p := a.pane(); p != nil {
+				before := p.Table.Sel()
+				p.Table.Move(-TableFetchLimit, nrows)
+				if p.Table.Sel() == before {
+					return a.setToast("已在第一页")
+				}
+			}
+			return nil
 		}
 		return nil
 
@@ -1693,16 +1678,6 @@ func (a *App) CurrentFrame() *data.Frame {
 func (a *App) CurrentRow() int {
 	if p := a.pane(); p != nil {
 		return p.Table.Sel()
-	}
-	return 0
-}
-
-// SheetFieldCursor reports the selected field index in sheet mode. It is
-// always a valid column index for the current frame, or 0 when no pane is
-// open.
-func (a *App) SheetFieldCursor() int {
-	if p := a.pane(); p != nil {
-		return p.SheetField
 	}
 	return 0
 }

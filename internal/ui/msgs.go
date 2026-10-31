@@ -92,9 +92,6 @@ type ExecProcessMsg struct {
 	OnDone func(error) tea.Msg
 }
 
-// CopyTextMsg copies text to the system clipboard via OSC52.
-type CopyTextMsg struct{ Text string }
-
 // columnMetaMsg delivers asynchronously-fetched column metadata for a table so
 // the sheet view can display the real column type. The cache stores it under
 // the table name when the err is nil and the backend still matches.
@@ -103,12 +100,6 @@ type columnMetaMsg struct {
 	meta  []db.ColumnMeta
 	err   error
 }
-
-// SetTimeRangeMsg sets the time range for OpenObserve queries.
-type SetTimeRangeMsg struct{ Minutes int }
-
-// SetPageMsg navigates to a specific page in paginated results.
-type SetPageMsg struct{ Page int }
 
 // SetQueryParamsMsg sets time range, page, and page size on an OpenObserve
 // backend and triggers a single table refresh.
