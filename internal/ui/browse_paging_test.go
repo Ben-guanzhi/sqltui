@@ -207,3 +207,52 @@ func TestBrowsePagingEmptyWindowExhausts(t *testing.T) {
 		t.Fatal("walk not marked done after empty window")
 	}
 }
+
+// ctxProbeBackend records ctx.Err() as seen inside BrowsePage: the pre-fix
+// ActNextPage deferred cancel() in dispatch scope, so the runtime executed
+// the Cmd with an already-cancelled context and every ">" failed with
+// "context canceled" — the green tests hid it because the fake ignored ctx.
+type ctxProbeBackend struct {
+	fakeBackend
+	ctxErr error
+}
+
+func (f *ctxProbeBackend) BrowsePage(ctx context.Context, _, _ string, req *db.BrowsePageRequest) (*db.BrowsePageResult, error) {
+	f.ctxErr = ctx.Err()
+	frame := data.New("id", "name", "comment")
+	frame.AppendRow([]any{"1", "a", "c"})
+	return &db.BrowsePageResult{Frame: frame, Total: 1, TotalFound: true, SortColumn: "id"}, nil
+}
+
+// TestBrowsePageContextAliveInsideCmd pins that the browse context is live
+// when the runtime actually runs the Cmd, not just when dispatch returns it.
+func TestBrowsePageContextAliveInsideCmd(t *testing.T) {
+	bb := &ctxProbeBackend{}
+	a := New(Options{
+		Frames:  []reader.NamedFrame{{Name: "t", Frame: testFrame(1)}},
+		Backend: bb,
+	})
+	a.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	a.Update(ApplyFrameMsg{
+		Frame:           testFrame(1),
+		NewTab:          true,
+		TabTitle:        "orders",
+		SourceNamespace: "sales",
+		SourceTable:     "orders",
+	})
+	_, cmd := a.Update(key(">"))
+	if cmd == nil {
+		t.Fatal("ActNextPage returned no command")
+	}
+	msg := cmd()
+	pm, ok := msg.(BrowsePageMsg)
+	if !ok {
+		t.Fatalf("cmd returned %T, want BrowsePageMsg", msg)
+	}
+	if pm.err != nil {
+		t.Fatalf("BrowsePage error: %v", pm.err)
+	}
+	if bb.ctxErr != nil {
+		t.Fatalf("context was already cancelled when the Cmd ran: %v", bb.ctxErr)
+	}
+}

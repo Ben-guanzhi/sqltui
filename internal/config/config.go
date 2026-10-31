@@ -207,7 +207,18 @@ func ReadSection[T any](get func(*SqlConfig) *T, set func(*SqlConfig, *T), fillD
 }
 
 // WriteSection replaces one engine section, preserving the others.
+// A file that exists but does not parse aborts the write: readSqlConfig's
+// zero-on-corrupt fallback exists so a FIRST connection can be saved on a
+// fresh machine — repurposing it on a corrupt file silently drops every
+// other engine's stored credentials. updateSection got the same guard in
+// wave 29; the two write paths now agree.
 func WriteSection[T any](get func(*SqlConfig) *T, set func(*SqlConfig, *T), v *T) error {
+	if data, err := os.ReadFile(ConfigFile); err == nil {
+		var probe SqlConfig
+		if err := yaml.Unmarshal(data, &probe); err != nil {
+			return fmt.Errorf("config %s 无法解析，拒绝覆盖写入（请先手工修复）: %w", ConfigFile, err)
+		}
+	}
 	tmpConf := readSqlConfig()
 	set(&tmpConf, v)
 	return writeSqlConfig(tmpConf)

@@ -1051,13 +1051,17 @@ func (a *App) dispatch(action, key string) tea.Cmd {
 						Page:  st.page + 1,
 						Limit: TableFetchLimit,
 					}
-					st := st
+				st := st
+				return func() tea.Msg {
+					// The ctx lives inside the Cmd closure: a defer in dispatch
+					// fires the moment dispatch returns the command — before the
+					// runtime runs it — and BrowsePage received an already-cancelled
+					// context (green tests hid this: the fake ignores ctx).
 					ctx, cancel := context.WithTimeout(context.Background(), browsePageTimeout)
 					defer cancel()
-					return func() tea.Msg {
-						res, err := bb.BrowsePage(ctx, st.ns, st.table, req)
-						return BrowsePageMsg{st: st, res: res, err: err}
-					}
+					res, err := bb.BrowsePage(ctx, st.ns, st.table, req)
+					return BrowsePageMsg{st: st, res: res, err: err}
+				}
 				}
 				return a.setToast("已是最后一页")
 			}
