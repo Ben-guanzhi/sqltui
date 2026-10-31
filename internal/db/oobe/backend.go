@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/LinPr/sqltui/internal/data"
@@ -35,6 +36,11 @@ type Backend struct {
 	// server sends [[DONE]] and has no deadline of its own, so esc/ctrl+c is
 	// the only way to stop one — which is exactly what CancelRunning does.
 	cancelReg db.CancelRegistry
+
+	// mu guards the query-window and paging fields: the Update loop writes
+	// them (SetPage/SetTimeRange/ResetTimeWindow) while TableLoader
+	// goroutines read them inside FetchTable.
+	mu sync.Mutex
 }
 
 var (
@@ -61,38 +67,74 @@ func Connect(cfg Config) (*Backend, error) {
 
 // SetTimeRange sets the query time range in minutes.
 func (b *Backend) SetTimeRange(minutes int) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	if minutes > 0 {
 		b.timeRange = minutes
 	}
 }
 
 // GetTimeRange returns the current time range in minutes.
-func (b *Backend) GetTimeRange() int { return b.timeRange }
+func (b *Backend) GetTimeRange() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.timeRange
+}
 
 // SetPage sets the current 0-based page index.
 func (b *Backend) SetPage(page int) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	if page >= 0 {
 		b.page = page
 	}
 }
 
 // GetPage returns the current 0-based page index.
-func (b *Backend) GetPage() int { return b.page }
+func (b *Backend) GetPage() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.page
+}
 
 // GetPageSize returns the page size.
-func (b *Backend) GetPageSize() int { return b.pageSize }
+func (b *Backend) GetPageSize() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.pageSize
+}
 
 // ResetTimeWindow recalculates the query time window to end NOW.
 // Called on explicit refresh (r key) or when the time-range setting changes.
 func (b *Backend) ResetTimeWindow() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.resetWindowLocked()
+}
+
+func (b *Backend) resetWindowLocked() {
 	b.endUS = nowMicros()
 	b.startUS = b.endUS - int64(time.Duration(b.timeRange)*time.Minute/time.Microsecond)
 }
 
 func (b *Backend) SetPageSize(n int) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	if n > 0 {
 		b.pageSize = n
 	}
+}
+
+// snapshotWindow returns the query window and paging state under one lock.
+// The lazy first-window init made even a read a write, so the goroutine-side
+// readers must come through here rather than touching the fields directly.
+func (b *Backend) snapshotWindow() (startUS, endUS int64, page, pageSize int) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.startUS == 0 {
+		b.resetWindowLocked()
+	}
+	return b.startUS, b.endUS, b.page, b.pageSize
 }
 
 func (b *Backend) Kind() string { return "openobserve" }
@@ -299,15 +341,12 @@ func (b *Backend) FetchTable(namespace, table string, limit int) (*data.Frame, e
 		metas = nil
 	}
 
-	if b.startUS == 0 {
-		b.ResetTimeWindow()
-	}
-	startUS, endUS := b.startUS, b.endUS
+	startUS, endUS, page, pageSize := b.snapshotWindow()
 
-	offset := b.page * b.pageSize
+	offset := page * pageSize
 
 	sql := "SELECT * FROM " + b.TableTarget(namespace, table) + " ORDER BY _timestamp DESC"
-	body := buildSearchBodyWithOffset(sql, b.pageSize, offset, startUS, endUS)
+	body := buildSearchBodyWithOffset(sql, pageSize, offset, startUS, endUS)
 	ctx, done := b.requestCtx()
 	defer done()
 	rc, err := b.client.postSSE(
@@ -330,11 +369,9 @@ func (b *Backend) FetchTable(namespace, table string, limit int) (*data.Frame, e
 // table view reads: a query and the pane above it must not disagree about
 // which minutes of data exist.
 func (b *Backend) Run(stmt string) (db.Result, error) {
-	if b.startUS == 0 {
-		b.ResetTimeWindow()
-	}
+	startUS, endUS, _, _ := b.snapshotWindow()
 
-	hits, err := b.sseSearch(b.cfg.Org, stmt, 1000, b.startUS, b.endUS)
+	hits, err := b.sseSearch(b.cfg.Org, stmt, 1000, startUS, endUS)
 	if err != nil {
 		return db.Result{}, err
 	}
