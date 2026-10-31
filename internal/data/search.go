@@ -285,6 +285,36 @@ func SearchFuzzyFold(f *Frame, needle string, cache *FuzzyCache) []int {
 	return fuzzyMatchIndices(needle, hay)
 }
 
+// SearchFuzzyColsFold 模糊匹配限定列子集：任一子集列的单元格内容按
+// 子序列命中即整行命中。hay 与全帧 joinFrameRows 同一空格连接语义、
+// 仅拼接子集列，匹配器复用 fuzzyMatchIndices（判据同一份、由差分测试
+// 锁定）。空子集退化为全帧模糊搜索；不走过期缓存——汇总视图列数少，
+// 每次击键重建 hay 的成本可忽略。
+func SearchFuzzyColsFold(f *Frame, cols []int, needle string) []int {
+	rows := f.NumRows()
+	if needle == "" {
+		all := make([]int, rows)
+		for i := range all {
+			all[i] = i
+		}
+		return all
+	}
+	if len(cols) == 0 {
+		return SearchFuzzyFold(f, needle, nil)
+	}
+	hay := make([]string, rows)
+	parts := make([]string, len(cols))
+	for r := 0; r < rows; r++ {
+		for i, c := range cols {
+			if c >= 0 && c < len(f.Columns) {
+				parts[i] = f.CellString(r, c)
+			}
+		}
+		hay[r] = strings.Join(parts, " ")
+	}
+	return fuzzyMatchIndices(needle, hay)
+}
+
 // fuzzyMatchIndices 按行判定"中/不中"，按帧序返回索引。判据与 fuzzy.Find 逐位
 // 等价（同一行的中/不中一致），但不打分、不排序——SearchFuzzy 只用索引，打分
 // 与 fuzzy.Find 的末尾排序全程是白付的。等价性由 TestSearchFuzzyFoldMatches

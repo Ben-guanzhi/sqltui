@@ -277,3 +277,23 @@ func TestPalettePaste(t *testing.T) {
 		t.Fatalf("empty paste changed state: %q cursor %d", p.input.String(), p.input.Cursor())
 	}
 }
+
+// TestPaletteCorpusIncludesRuntimeRegistrations pins the lazy corpus: dbmode
+// registers "connect"/"opentable" via RegisterCommand at RUNTIME (dbmode.Run,
+// after package init), and a package-level var snapshot predating those left
+// the palette unable to resolve or fuzzy-match them. The corpus must be
+// rebuilt on each use so every registered command is reachable.
+func TestPaletteCorpusIncludesRuntimeRegistrations(t *testing.T) {
+	const probe = "palette-corpus-probe"
+	RegisterCommand(Command{Name: probe, Description: "corpus probe"},
+		func(ctx ui.AppContext, arg string) (ui.Overlay, error) {
+			return nil, nil
+		})
+
+	if _, ok := paletteResolve(probe); !ok {
+		t.Fatal("runtime-registered command not resolvable by exact token")
+	}
+	if ids := paletteFilter("corpusprob"); len(ids) == 0 {
+		t.Fatal("paletteFilter found no match for a runtime-registered command")
+	}
+}

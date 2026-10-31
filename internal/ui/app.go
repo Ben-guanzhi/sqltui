@@ -1195,7 +1195,7 @@ func (a *App) dispatch(action, key string) tea.Cmd {
 	case ActFuzzy:
 		if len(p.TableCols) > 0 {
 			p.HScroll = 0
-			a.search.StartCols(f, false, p.TableCols)
+			a.search.StartCols(f, true, p.TableCols)
 		} else {
 			a.search.Start(f, true)
 		}

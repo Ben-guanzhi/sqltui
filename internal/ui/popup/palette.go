@@ -75,9 +75,13 @@ type paletteEntry struct {
 	cmd  int // index into Commands
 }
 
-// paletteCorpus lists every name and alias once (built lazily, read-only).
-var paletteCorpus = func() []paletteEntry {
-	var es []paletteEntry
+// buildPaletteCorpus lists every registered name and alias once. Rebuilt on
+// each palette open instead of frozen in a package-level var: dbmode
+// registers "connect"/"opentable" at RUNTIME (dbmode.Run, after all package
+// init), and a var initializer snapshot predating those left the palette
+// unable to fuzzy-find them even though help listed them.
+func buildPaletteCorpus() []paletteEntry {
+	es := make([]paletteEntry, 0, len(Commands))
 	for i, c := range Commands {
 		es = append(es, paletteEntry{text: c.Name, cmd: i})
 		for _, a := range c.Aliases {
@@ -85,7 +89,7 @@ var paletteCorpus = func() []paletteEntry {
 		}
 	}
 	return es
-}()
+}
 
 // paletteSource adapts the corpus to the fuzzy matcher.
 type paletteSource struct{ entries []paletteEntry }
@@ -100,7 +104,7 @@ func paletteResolve(token string) (string, bool) {
 	if token == "" {
 		return "", false
 	}
-	for _, e := range paletteCorpus {
+	for _, e := range buildPaletteCorpus() {
 		if e.text == token {
 			return Commands[e.cmd].Name, true
 		}
@@ -119,11 +123,12 @@ func paletteFilter(pattern string) []int {
 		}
 		return all
 	}
-	matches := fuzzy.FindFrom(pattern, paletteSource{paletteCorpus})
+	corpus := buildPaletteCorpus()
+	matches := fuzzy.FindFrom(pattern, paletteSource{corpus})
 	seen := make(map[int]bool, len(matches))
 	var out []int
 	for _, m := range matches {
-		ci := paletteCorpus[m.Index].cmd
+		ci := corpus[m.Index].cmd
 		if !seen[ci] {
 			seen[ci] = true
 			out = append(out, ci)

@@ -57,6 +57,42 @@ func TestSearchFuzzy(t *testing.T) {
 	}
 }
 
+// TestSearchFuzzyColsFold 钉住限定列子集的模糊语义：命中只看子集列，
+// 大小写不敏感（SimpleFold 轨道），空子集与全帧模糊逐条一致。
+func TestSearchFuzzyColsFold(t *testing.T) {
+	f := searchFixture()
+	cases := []struct {
+		name   string
+		cols   []int
+		needle string
+		want   []int
+	}{
+		{"name column only", []int{0}, "ban", []int{1}},
+		{"qty column only: text hidden", []int{1}, "ban", []int{}},
+		{"qty column: number subsequence", []int{1}, "2", []int{1, 3}},
+		{"case-insensitive via fold", []int{0}, "APPLE", []int{0}},
+		{"both columns widen the net", []int{0, 1}, "42", []int{3}},
+		{"empty needle matches all", []int{0}, "", []int{0, 1, 2, 3}},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			got := SearchFuzzyColsFold(f, tt.cols, tt.needle)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("SearchFuzzyColsFold(cols=%v, %q) = %v, want %v", tt.cols, tt.needle, got, tt.want)
+			}
+		})
+	}
+
+	// 空子集必须与全帧模糊搜索逐条一致（同一匹配器、同一 hay 语义）。
+	for _, needle := range []string{"apie", "ban", "2", ""} {
+		full := SearchFuzzyFold(f, needle, nil)
+		degenerate := SearchFuzzyColsFold(f, nil, needle)
+		if !reflect.DeepEqual(full, degenerate) {
+			t.Errorf("empty cols diverged from full frame for %q: %v vs %v", needle, degenerate, full)
+		}
+	}
+}
+
 func TestSearchFuzzyPreservesFrameOrder(t *testing.T) {
 	f := frameOf(Column{Name: "w", Type: TypeString, cells: []any{
 		"xxcatxx", "cat", "c-a-t", "dog",

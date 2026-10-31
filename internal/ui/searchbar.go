@@ -109,7 +109,13 @@ func (s *SearchBar) recompute() {
 	}
 	var rows []int
 	if len(s.searchCols) > 0 {
-		rows = data.SearchExactColsFold(s.base, s.searchCols, s.query, &s.fold)
+		if s.fuzzy {
+			// 限定列 + 模糊：/ 在汇总视图（TableCols）上的真实语义——此前
+			// fuzzy 标志在此被忽略，帮助文案与行为不符。
+			rows = data.SearchFuzzyColsFold(s.base, s.searchCols, s.query)
+		} else {
+			rows = data.SearchExactColsFold(s.base, s.searchCols, s.query, &s.fold)
+		}
 	} else if s.fuzzy {
 		rows = data.SearchFuzzyFold(s.base, s.query, &s.fuzzyCache)
 	} else {
