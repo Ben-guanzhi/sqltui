@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"fmt"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -105,6 +106,57 @@ func TestCancelRunningStopsStatement(t *testing.T) {
 }
 
 // 表浏览翻页：单键 keyset 续读（游标类型化）+ 无单键 OFFSET 降级 + Total。
+// TestBrowsePageCompositeKeyDegradesToOffset pins the composite-key
+// degradation: a two-column PK must not install a single-column keyset (a
+// cursor on pk0 alone skips rows sharing pk0 with a different pk1). The
+// walk takes OFFSET over a full PK-ordered sort, reports no sort column
+// (the UI takes its OFFSET branch), and pages through without skips.
+func TestBrowsePageCompositeKeyDegradesToOffset(t *testing.T) {
+	ctx := context.Background()
+	drv, err := dbcoresqlite.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := New(drv, Options{Kind: "sqlite", Title: "composite"})
+
+	b.Run("CREATE TABLE ck(a INTEGER, b INTEGER, payload TEXT, PRIMARY KEY(a, b))")
+	// 8 groups of 6 rows sharing the same `a`: a pk0-only keyset would jump
+	// straight past five of every six rows.
+	seed := "WITH RECURSIVE n(x) AS (SELECT 0 UNION ALL SELECT x+1 FROM n WHERE x < 47) "
+	if _, err := b.Run(seed + "INSERT INTO ck(a,b,payload) SELECT x/6, x%6, 'row'||x FROM n"); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	seen := map[string]bool{}
+	pageSize := 20
+	// The kernel's Page is 1-based: offset = (Page-1)*pageSize.
+	req := &db.BrowsePageRequest{Limit: pageSize, Page: 1}
+	for page := 1; page <= 5; page++ {
+		res, err := b.BrowsePage(ctx, "main", "ck", req)
+		if err != nil {
+			t.Fatalf("page %d: %v", page, err)
+		}
+		if res.SortColumn != "" {
+			t.Fatalf("composite key reported sort column %q, want empty", res.SortColumn)
+		}
+		for r := 0; r < res.Frame.NumRows(); r++ {
+			a := res.Frame.ColumnIndex("a")
+			bb := res.Frame.ColumnIndex("b")
+			av := fmt.Sprint(res.Frame.Row(r)[a])
+			bv := fmt.Sprint(res.Frame.Row(r)[bb])
+			id := av + ":" + bv
+			if seen[id] {
+				t.Fatalf("row %s seen twice (page %d)", id, page)
+			}
+			seen[id] = true
+		}
+		req = &db.BrowsePageRequest{Limit: pageSize, Page: page + 1}
+	}
+	if len(seen) != 48 {
+		t.Fatalf("saw %d distinct rows, want 48 (no skips)", len(seen))
+	}
+}
+
 func TestBrowsePage(t *testing.T) {
 	ctx := context.Background()
 	drv, err := dbcoresqlite.Open(":memory:")

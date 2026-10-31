@@ -268,11 +268,16 @@ func (b *Backend) FetchTable(namespace, table string, limit int) (*data.Frame, e
 		return nil, err
 	}
 	selectSQL := "SELECT * FROM " + b.opt.Target(namespace, table)
+	// Order by every PK column (composite keys included): BrowsePage's
+	// composite sort uses the same column list, so the pages line up.
+	var pkNames []string
 	for _, c := range cols {
 		if c.IsPrimaryKey {
-			selectSQL += " ORDER BY " + QuoteIdent(b.dbType, c.Name)
-			break
+			pkNames = append(pkNames, QuoteIdent(b.dbType, c.Name))
 		}
+	}
+	if len(pkNames) > 0 {
+		selectSQL += " ORDER BY " + strings.Join(pkNames, ", ")
 	}
 	query := sqltext.RowLimit(b.dbType, selectSQL, limit)
 	res, err := b.drv.Execute(ctx, query)
@@ -303,21 +308,33 @@ func (b *Backend) BrowsePage(ctx context.Context, namespace, table string, req *
 	if err != nil {
 		return nil, err
 	}
-	// The keyset anchor: a single primary key is the natural continuation.
+	// The keyset anchor: a single primary key is the natural continuation. A
+	// composite key must NOT install a single-column keyset — a cursor on
+	// pk0 alone silently skips every row sharing that pk0 value with a
+	// different pk1. Composite keys degrade to OFFSET paging over a full
+	// PK-ordered sort (stable pages, no skips).
 	var sortKey *dbcore.SortKey
 	pkCount := 0
+	var pkNames []string
 	for _, c := range cols {
 		if !c.IsPrimaryKey {
 			continue
 		}
 		pkCount++
+		pkNames = append(pkNames, c.Name)
 		if pkCount == 1 {
 			sortKey = &dbcore.SortKey{Column: c.Name}
 		}
 	}
 
 	rreq := &dbcore.TableRowsRequest{Page: req.Page, PageSize: limit}
-	if sortKey != nil {
+	if pkCount > 1 {
+		sort := make([]dbcore.SortKey, len(pkNames))
+		for i, name := range pkNames {
+			sort[i] = dbcore.SortKey{Column: name}
+		}
+		rreq.Sort = sort
+	} else if sortKey != nil {
 		rreq.Sort = []dbcore.SortKey{*sortKey}
 		if req.After != nil {
 			colType := ""
@@ -337,7 +354,10 @@ func (b *Backend) BrowsePage(ctx context.Context, namespace, table string, req *
 	}
 	qr := &dbcore.QueryResult{Columns: res.Columns, Rows: res.Rows}
 	sortCol := ""
-	if sortKey != nil {
+	// A composite key reports no sort column: the UI's cursor then takes the
+	// OFFSET branch (page++) instead of trying to continue a keyset the
+	// adapter did not install.
+	if pkCount == 1 && sortKey != nil {
 		sortCol = sortKey.Column
 	}
 	return &db.BrowsePageResult{Frame: FrameFromResult(qr), Total: res.Total, TotalFound: res.TotalFound, SortColumn: sortCol}, nil
