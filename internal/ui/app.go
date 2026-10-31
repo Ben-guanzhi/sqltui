@@ -461,12 +461,23 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, tea.Batch(cmds...)
 
 	case tea.KeyPressMsg:
-		// ctrl+c stops the statement in flight first: the query editor closes
-		// as soon as a statement is sent, so a running query has no other
-		// handle. With nothing in flight it quits, as before.
+		// ctrl+c layering: a modal overlay owns it first (confirm boxes bind
+		// it to cancel, the table-fetch overlay cancels the fetch and closes
+		// itself — quitting from under one would throw the user's pending
+		// decision away). Next the statement in flight: the query editor
+		// closes as soon as a statement is sent, so a running query has no
+		// other handle. Then active inline editors (search bar, sheet cell
+		// edit / filter) bind ctrl+c to cancel themselves. With nothing
+		// modal, editing, or running, it quits, as before.
 		if m.String() == "ctrl+c" {
+			if n := len(a.overlays); n > 0 {
+				return a.handleKey(m)
+			}
 			if c, ok := a.backend.(db.Canceler); ok && c.CancelRunning() {
 				return a, a.setToast("query canceled")
+			}
+			if p := a.pane(); a.search.Active() || (p != nil && (p.SheetEditing || p.SheetFiltering)) {
+				return a.handleKey(m)
 			}
 			return a, tea.Quit
 		}
