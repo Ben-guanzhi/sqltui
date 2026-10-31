@@ -210,12 +210,16 @@ func sheetKeyEntryHeightCols(f *data.Frame, cols []int, pos, keyW int) int {
 // sheetBodyEntryHeightCols returns the number of body lines entry at position
 // pos occupies in renderSheet. All entries (cursor and compact) use
 // max(key height, value height) so both views expand to fit multi-line values.
+// The compact body indents continuation lines with a two-char prefix, so the
+// value wraps at valW-1 — the model must count at the same width or long
+// values fold one line later than the heights predict and the cursor row
+// drifts out of view.
 func sheetBodyEntryHeightCols(f *data.Frame, cols []int, pos, dataRow, keyW, valW int) int {
 	kh := sheetKeyEntryHeightCols(f, cols, pos, keyW)
 	if f == nil || pos < 0 || pos >= len(cols) {
 		return kh
 	}
-	vh := sheetValueLineCount(f, dataRow, cols[pos], valW)
+	vh := sheetValueLineCount(f, dataRow, cols[pos], valW-1)
 	if vh > kh {
 		return vh
 	}
@@ -452,7 +456,10 @@ func renderSheet(f *data.Frame, row, off, width, height, fieldCursor int, editin
 			// multi-line content (e.g. JSON) never bleeds into the key area.
 			keyNameLines := strings.Split(ansi.Wrap(colName, keyW, ""), "\n")
 			val := sheetSanitize(f.CellString(row, c))
-			valAvail := inner - keyW - 2
+			// The ": "/"  " prefix makes the real value width valW-1: the
+			// scroll model (sheetValueLineCount callers) must agree or long
+			// values fold one line later than the pane's heights predict.
+			valAvail := valW - 1
 			if valAvail < 1 {
 				valAvail = 1
 			}
