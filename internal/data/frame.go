@@ -227,7 +227,11 @@ func FormatValue(v any) string {
 	case int64:
 		return strconv.FormatInt(x, 10)
 	case float64:
-		return strconv.FormatFloat(x, 'g', -1, 64)
+		// 'f' with shortest-round-trip precision: 'g' switches to exponent
+		// notation at 1e6/1e-4, and a SUM or money column is not scientific
+		// notation — every display path (grid, sheet, copy, JSON view) shows
+		// the same plain digits the user stored.
+		return strconv.FormatFloat(x, 'f', -1, 64)
 	case bool:
 		if x {
 			return "true"

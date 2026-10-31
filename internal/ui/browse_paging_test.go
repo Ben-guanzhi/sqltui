@@ -96,8 +96,8 @@ func TestBrowsePagingWalkAndRefresh(t *testing.T) {
 	if st.after == nil || len(st.after) != 1 {
 		t.Fatalf("cursor after = %v, want single keyset value", st.after)
 	}
-	if st.page != 1 {
-		t.Fatalf("page after keyset advance = %d, want 1 (keyset keeps page)", st.page)
+	if st.page != 2 {
+		t.Fatalf("page after keyset advance = %d, want 2 (the counter feeds the toast)", st.page)
 	}
 	if st.loaded != 4 {
 		t.Fatalf("loaded = %d, want 4", st.loaded)

@@ -1537,13 +1537,24 @@ func (a *App) browsePageApplied(m BrowsePageMsg) tea.Cmd {
 		col := window.ColumnIndex(res.SortColumn)
 		last := window.Row(window.NumRows() - 1)
 		if col >= 0 {
-			st.after = []string{fmt.Sprint(last[col])}
+			switch v := last[col].(type) {
+			case nil:
+				// keyset cannot continue past a NULL sort key: WHERE pk > NULL
+				// matches nothing, so the walk is exhausted, not stuck.
+				st.done = true
+			case time.Time:
+				// ISO 8601 with T: the text cursor binds against a datetime
+				// sort column, and fmt.Sprint's "+0800 CST" suffix parses
+				// nowhere.
+				st.after = []string{v.Format("2006-01-02T15:04:05.9999999")}
+			default:
+				st.after = []string{fmt.Sprint(v)}
+			}
 			st.sortColumn = res.SortColumn
 		}
-	} else {
-		st.page++
-		st.after = nil
 	}
+	// The page counter feeds the toast: it advances in keyset mode too.
+	st.page++
 	st.loaded += window.NumRows()
 	if res.TotalFound {
 		st.total, st.totalFound = res.Total, true
