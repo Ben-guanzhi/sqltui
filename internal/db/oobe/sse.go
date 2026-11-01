@@ -10,6 +10,12 @@ import (
 	"time"
 )
 
+// sseHitsCap bounds the hits one SSE stream may deliver. The dashboard panel
+// asks the server for size=-1 (unlimited), so a pathological server could
+// stream hits forever and grow the client without bound; the cap sits far
+// above what a terminal-sized panel can show.
+const sseHitsCap = 50000
+
 func basicAuth(user, pass string) string {
 	return base64.StdEncoding.EncodeToString([]byte(user + ":" + pass))
 }
@@ -88,6 +94,13 @@ func readSSEHits(r io.ReadCloser) ([]map[string]any, error) {
 				return hits, fmt.Errorf("sse: parse hits: %w", err)
 			}
 			hits = append(hits, resp.Hits...)
+			if len(hits) > sseHitsCap {
+				// The dashboard panel asks the server for size=-1 (unlimited);
+				// a pathological server could stream hits forever and grow the
+				// client without bound. The cap sits far above what a
+				// terminal-sized panel can show.
+				return hits, fmt.Errorf("sse: stream delivered more than %d hits; refusing to buffer the rest", sseHitsCap)
+			}
 			continue
 		}
 

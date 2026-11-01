@@ -389,6 +389,11 @@ func cursorValues(colType string, vals []string) []dbcore.Value {
 				out[i] = dbcore.Value{Kind: dbcore.ValFloat, F: f}
 				continue
 			}
+		case cursorText:
+			// Text binds as text even when the value looks numeric: the
+			// declared type, not the digits, decides the comparison.
+			out[i] = dbcore.Value{Kind: dbcore.ValText, S: v}
+			continue
 		}
 		out[i] = dbcore.Value{Kind: dbcore.ValText, S: v}
 	}
@@ -400,10 +405,14 @@ type cursorClass int
 const (
 	cursorInt   cursorClass = iota
 	cursorFloat cursorClass = iota
+	cursorText  cursorClass = iota
 )
 
-// classifyCursorType folds the engines' spellings onto two numeric classes;
-// anything else (and any cursor that fails to parse) rides as text.
+// classifyCursorType folds the engines' spellings onto three classes: numeric
+// cursors bind as numbers, everything else (text, blob, an unparseable type)
+// rides as text. The declared type decides, not the value: a VARCHAR primary
+// key holding "123" must bind as text, or PostgreSQL rejects
+// "character varying > integer".
 func classifyCursorType(colType string) cursorClass {
 	upper := strings.ToUpper(colType)
 	for _, t := range []string{"INT", "INT2", "INT4", "INT8", "BIGINT", "SMALLINT", "TINYINT", "MEDIUMINT"} {
@@ -416,7 +425,7 @@ func classifyCursorType(colType string) cursorClass {
 			return cursorFloat
 		}
 	}
-	return 0
+	return cursorText
 }
 
 // PrimaryKeys lists the primary-key column names of namespace.table in

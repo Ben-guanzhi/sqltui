@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/big"
 	"os"
 	"strings"
 	"time"
@@ -211,26 +212,46 @@ func convertParquetValue(v pq.Value, leaf parquetLeaf) any {
 	}
 }
 
-// decimalFloat converts a DECIMAL-annotated value to float64.
+// decimalFloat converts a DECIMAL-annotated value to float64. The fixed-length
+// byte array form (DECIMAL precision above 18, e.g. DECIMAL(38,x)) does not fit
+// an int64, so the accumulation runs on big.Int: the old int64 shift silently
+// overflowed and turned such values into garbage. The division runs on
+// big.Rat, so what a float cell carries is the correctly-rounded value.
 func decimalFloat(v pq.Value, scale int32) float64 {
-	div := 1.0
-	for i := int32(0); i < scale; i++ {
-		div *= 10
-	}
 	switch v.Kind() {
 	case pq.Int32:
-		return float64(v.Int32()) / div
+		return float64(v.Int32()) / pow10(scale)
 	case pq.Int64:
-		return float64(v.Int64()) / div
+		return float64(v.Int64()) / pow10(scale)
 	default: // fixed-len byte array big-endian two's complement
 		b := v.ByteArray()
-		var n int64
+		n := new(big.Int).SetBytes(b)
 		if len(b) > 0 && b[0]&0x80 != 0 {
-			n = -1
+			n.Neg(n)
 		}
-		for _, c := range b {
-			n = n<<8 | int64(c)
+		if scale < 0 {
+			// A negative scale means the stored integer is already scaled up:
+			// multiply rather than divide.
+			n.Mul(n, pow10Int(-scale))
+			f, _ := n.Float64()
+			return f
 		}
-		return float64(n) / div
+		r := new(big.Rat).SetFrac(n, pow10Int(scale))
+		f, _ := r.Float64()
+		return f
 	}
+}
+
+// pow10 renders 10^scale as float64 for the small-type branches.
+func pow10(scale int32) float64 {
+	if scale < 0 {
+		return 1.0
+	}
+	f, _ := pow10Int(scale).Float64()
+	return f
+}
+
+// pow10Int returns 10^n as an exact big.Int.
+func pow10Int(n int32) *big.Int {
+	return new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(n)), nil)
 }

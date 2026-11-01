@@ -159,9 +159,9 @@ type PanelQueryContext struct {
 
 // QueryPanel executes a panel SQL query over the current time window.
 func (b *Backend) QueryPanel(ctx PanelQueryContext) ([]map[string]any, error) {
-	if b.startUS == 0 {
-		b.ResetTimeWindow()
-	}
+	// The window is read through snapshotWindow like every other goroutine-side
+	// reader: reading the fields directly races the Update loop's writes.
+	startUS, endUS, _, _ := b.snapshotWindow()
 	fallback := ctx.FallbackCol
 	if fallback == "" {
 		fallback = "_timestamp"
@@ -184,8 +184,8 @@ func (b *Backend) QueryPanel(ctx PanelQueryContext) ([]map[string]any, error) {
 	body := map[string]any{
 		"query": map[string]any{
 			"sql":        ctx.SQL,
-			"start_time": b.startUS,
-			"end_time":   b.endUS,
+			"start_time": startUS,
+			"end_time":   endUS,
 			"size":       -1,
 		},
 	}

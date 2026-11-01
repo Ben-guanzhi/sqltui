@@ -684,6 +684,9 @@ func (a *App) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		switch key {
 		case "l", "right":
 			p.HScroll += hStep
+			if max := hScrollMax(p); max > 0 && p.HScroll > max {
+				p.HScroll = max
+			}
 			return a, nil
 		case "h", "left":
 			p.HScroll -= hStep
@@ -695,6 +698,27 @@ func (a *App) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 
 	return a, a.dispatch(actionFor(key, TableBindings, GlobalBindings), key)
+}
+
+// hScrollMax is the widest cell of the pane's last visible column (the one
+// HScroll pans within), past which scrolling right shows nothing. Zero — a
+// pane with no frame or no TableCols — leaves the offset unclamped upward.
+func hScrollMax(p *Pane) int {
+	f := p.Current()
+	if f == nil || len(p.TableCols) == 0 {
+		return 0
+	}
+	col := p.TableCols[len(p.TableCols)-1]
+	if col < 0 || col >= f.NumCols() {
+		return 0
+	}
+	max := 0
+	for i := 0; i < f.NumRows(); i++ {
+		if w := ansi.StringWidth(f.CellString(i, col)); w > max {
+			max = w
+		}
+	}
+	return max
 }
 
 // handleSheetFilterKey routes keys while the sheet field-filter input is
@@ -1064,7 +1088,14 @@ func (a *App) dispatch(action, key string) tea.Cmd {
 					return BrowsePageMsg{st: st, res: res, err: err}
 				}
 				}
-				return a.setToast("已是最后一页")
+				// The pane is not a browsable table (a query result, a panel):
+				// there is no page walk to be "at the end of", so stay silent
+				// like ActPrevPage's equivalent — the old toast claimed "last
+				// page" for a pane that never paged.
+				if st := a.activeBrowse(); st != nil && st.done {
+					return a.setToast("已是最后一页")
+				}
+				return nil
 			}
 		}
 		return nil
@@ -1554,6 +1585,10 @@ func (a *App) browsePageApplied(m BrowsePageMsg) tea.Cmd {
 				// sort column, and fmt.Sprint's "+0800 CST" suffix parses
 				// nowhere.
 				st.after = []string{v.Format("2006-01-02T15:04:05.9999999")}
+			case []byte:
+				// A BLOB sort column continues as its text form: fmt.Sprint's
+				// "[104 101 ...]" byte list never matches in SQL.
+				st.after = []string{string(v)}
 			default:
 				st.after = []string{fmt.Sprint(v)}
 			}
