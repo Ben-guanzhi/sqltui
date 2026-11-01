@@ -13,6 +13,7 @@ import (
 	"github.com/LinPr/sqltui/internal/config"
 	"github.com/LinPr/sqltui/internal/data"
 	"github.com/LinPr/sqltui/internal/db"
+	dbcore "github.com/LinPr/sqltui/internal/db/core"
 	"github.com/LinPr/sqltui/internal/query"
 	"github.com/LinPr/sqltui/internal/reader"
 	"github.com/LinPr/sqltui/internal/theme"
@@ -1463,6 +1464,12 @@ func (a *App) applyFrame(m ApplyFrameMsg) tea.Cmd {
 			crumb = "op"
 		}
 		target.Push(m.Frame, crumb)
+	}
+	if m.Truncated {
+		// The frame holds only the first AdHocRowLimit rows; say so, so the
+		// result never reads as complete (an export or a trusted view would
+		// silently drop the tail).
+		return a.setToast(fmt.Sprintf("showing first %d rows (ad-hoc cap reached)", dbcore.AdHocRowLimit))
 	}
 	return nil
 }

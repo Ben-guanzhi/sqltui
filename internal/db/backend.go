@@ -19,6 +19,10 @@ type ExecResult struct {
 type Result struct {
 	Frame *data.Frame
 	Exec  *ExecResult
+	// Truncated marks an ad-hoc row-set that hit the adHocRowLimit cap: the
+	// frame holds only the first N rows, so a silent "looks complete" view
+	// would hide the dropped tail. Consumers surface it as a visible marker.
+	Truncated bool
 }
 
 // ColumnMeta describes one column of a live table, for the info overlay

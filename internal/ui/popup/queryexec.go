@@ -29,41 +29,57 @@ type qxExecInfo struct {
 // qxRun executes sqlText through whichever facility the app has: a live
 // database backend takes precedence (database mode), otherwise the embedded
 // engine (file mode). Exactly one of frame/info is non-nil on success.
-func qxRun(ctx ui.AppContext, sqlText string) (*data.Frame, *qxExecInfo, error) {
+// qxRun executes sqlText through whichever facility the app has: a live
+// database backend takes precedence (database mode), otherwise the embedded
+// engine (file mode). Exactly one of frame/info is non-nil on success.
+// truncated reports that a row-set hit the ad-hoc row cap (backend only).
+func qxRun(ctx ui.AppContext, sqlText string) (*data.Frame, *qxExecInfo, bool, error) {
 	if be := ctx.Backend(); be != nil {
 		res, err := be.Run(sqlText)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, false, err
 		}
 		if res.Frame != nil {
-			return res.Frame, nil, nil
+			return res.Frame, nil, res.Truncated, nil
 		}
 		if res.Exec != nil {
-			return nil, &qxExecInfo{rowsAffected: res.Exec.RowsAffected}, nil
+			return nil, &qxExecInfo{rowsAffected: res.Exec.RowsAffected}, false, nil
 		}
-		return nil, &qxExecInfo{}, nil
+		return nil, &qxExecInfo{}, false, nil
 	}
 	if eng := ctx.Engine(); eng != nil {
 		f, err := eng.Query(sqlText)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, false, err
 		}
-		return f, nil, nil
+		return f, nil, false, nil
 	}
-	return nil, nil, fmt.Errorf("no database connection and no embedded SQL engine available")
+	return nil, nil, false, fmt.Errorf("no database connection and no embedded SQL engine available")
 }
 
 // qxRunCmd wraps qxRun in a tea.Cmd, mapping the outcome to app messages:
 // row sets go through onFrame, exec outcomes become a toast and errors
-// become the error popup.
+// become the error popup. A truncated row-set still shows the (capped)
+// frame but marks it so the app can toast that rows were dropped — the
+// result never reads as complete.
 func qxRunCmd(ctx ui.AppContext, sqlText string, onFrame func(*data.Frame) tea.Msg) tea.Cmd {
 	return func() tea.Msg {
-		frame, info, err := qxRun(ctx, sqlText)
+		frame, info, truncated, err := qxRun(ctx, sqlText)
 		switch {
 		case err != nil:
 			return ui.ErrorMsg{Err: err}
 		case frame != nil:
-			return onFrame(frame)
+			msg := onFrame(frame)
+			// The frame-producing callbacks build an ApplyFrameMsg; stamp the
+			// truncation onto it rather than returning a second message (a
+			// tea.Cmd returns exactly one tea.Msg).
+			if truncated {
+				if af, ok := msg.(ui.ApplyFrameMsg); ok {
+					af.Truncated = true
+					msg = af
+				}
+			}
+			return msg
 		case info != nil:
 			return ui.ToastMsg{Text: fmt.Sprintf("%d rows affected", info.rowsAffected)}
 		default:

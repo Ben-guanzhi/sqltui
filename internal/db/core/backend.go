@@ -103,12 +103,12 @@ func (b *Backend) Run(stmt string) (db.Result, error) {
 	return b.RunBound(stmt, nil)
 }
 
-// adHocRowLimit caps one ad-hoc query's materialized rows. A bare
+// AdHocRowLimit caps one ad-hoc query's materialized rows. A bare
 // `SELECT *` used to append every row of the table into memory
 // (FrameFromResult); table fetches already cap at TableFetchLimit, the query
 // path had no ceiling at all. A visible truncation marker in the TUI is UI work (the frame shape
 // carries none); the cap itself is the same convention TableFetchLimit uses.
-const adHocRowLimit = 10000
+const AdHocRowLimit = 10000
 
 // RunBound is Run with bound parameters: values ride as driver arguments
 // (dbcore.ValueOf), never as concatenated text — the P0-4 rule.
@@ -130,8 +130,18 @@ func (b *Backend) RunBound(stmt string, args []any) (db.Result, error) {
 	if err != nil {
 		return db.Result{}, err
 	}
-	if len(res.Rows) > adHocRowLimit {
-		res.Rows = res.Rows[:adHocRowLimit]
+	truncated := false
+	if len(res.Rows) > AdHocRowLimit {
+		res.Rows = res.Rows[:AdHocRowLimit]
+		// Mark the truncation: a silent cut looks like a complete result,
+		// and the user would export or trust the frame unaware rows were
+		// dropped. The consumer (qxRunCmd) turns this into a visible toast.
+		truncated = true
+	}
+	if truncated {
+		out := b.result(res)
+		out.Truncated = true
+		return out, nil
 	}
 	return b.result(res), nil
 }

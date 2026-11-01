@@ -25,6 +25,11 @@ type ApplyFrameMsg struct {
 	Crumb    string
 	NewTab   bool
 	TabTitle string
+	// Truncated marks a row-set that hit the ad-hoc row cap: the frame holds
+	// only the first N rows. The app surfaces it as a visible toast so the
+	// result never reads as complete (an export or a trusted view would
+	// silently drop the tail).
+	Truncated bool
 	// PaneID identifies the pane the operation was started from (see
 	// AppContext.ActivePaneID). When set (non-zero) and NewTab is false the
 	// frame is pushed onto that pane even if the user has switched tabs while

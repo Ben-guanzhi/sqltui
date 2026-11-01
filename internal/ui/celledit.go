@@ -104,7 +104,18 @@ func parseTyped(val string, t data.DType) (any, error) {
 			return nil, fmt.Errorf("expected bool, got %q", val)
 		}
 		return b, nil
-	case data.TypeInt, data.TypeDate, data.TypeDatetime:
+	case data.TypeDate, data.TypeDatetime:
+		// The file-mode infer path (ParseAs) stores these as time.Time over
+		// the date/datetime layouts; parsing them as int64 here either
+		// rejected "2024-01-01" or silently stored an epoch int into a date
+		// cell (display corruption). Parse with the same layouts the
+		// inferred frame uses, so an edit round-trips as a date.
+		ts, ok := data.ParseAs(val, t)
+		if !ok {
+			return nil, fmt.Errorf("expected a %s, got %q", t, val)
+		}
+		return ts, nil
+	case data.TypeInt:
 		n, err := strconv.ParseInt(val, 10, 64)
 		if err != nil {
 			return nil, fmt.Errorf("expected integer, got %q", val)

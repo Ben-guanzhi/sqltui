@@ -99,6 +99,14 @@ func TestParseTyped(t *testing.T) {
 		{"abc", data.TypeInt, false},
 		{"abc", data.TypeFloat, false},
 		{"abc", data.TypeBool, false},
+		// Date/datetime edits must parse as dates, not as int64: a natural
+		// date string used to be rejected, and an epoch integer used to be
+		// stored into a date cell (display corruption).
+		{"2024-01-02", data.TypeDate, true},
+		{"2024/01/02", data.TypeDate, true},
+		{"2024-01-02 15:04:05", data.TypeDatetime, true},
+		{"not-a-date", data.TypeDate, false},
+		{"1704067200", data.TypeDate, false}, // epoch int must NOT be accepted as a date
 	}
 	for _, c := range cases {
 		v, err := parseTyped(c.val, c.t)

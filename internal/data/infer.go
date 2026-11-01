@@ -124,7 +124,7 @@ next:
 			if !quickReject(s, t) {
 				continue next
 			}
-			if _, ok := parseAs(s, t); !ok {
+			if _, ok := ParseAs(s, t); !ok {
 				continue next
 			}
 			evidence = true
@@ -192,7 +192,7 @@ func convertCells(cells []any, t DType) []any {
 		if s == "" {
 			continue
 		}
-		if parsed, ok := parseAs(s, t); ok {
+		if parsed, ok := ParseAs(s, t); ok {
 			out[i] = parsed
 		}
 	}
@@ -208,7 +208,7 @@ var (
 )
 
 // parseAs parses s (already trimmed, non-empty) as type t.
-func parseAs(s string, t DType) (any, bool) {
+func ParseAs(s string, t DType) (any, bool) {
 	switch t {
 	case TypeInt:
 		n, err := strconv.ParseInt(s, 10, 64)
