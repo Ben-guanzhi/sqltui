@@ -1076,17 +1076,17 @@ func (a *App) dispatch(action, key string) tea.Cmd {
 						Page:  st.page + 1,
 						Limit: TableFetchLimit,
 					}
-				st := st
-				return func() tea.Msg {
-					// The ctx lives inside the Cmd closure: a defer in dispatch
-					// fires the moment dispatch returns the command — before the
-					// runtime runs it — and BrowsePage received an already-cancelled
-					// context (green tests hid this: the fake ignores ctx).
-					ctx, cancel := context.WithTimeout(context.Background(), browsePageTimeout)
-					defer cancel()
-					res, err := bb.BrowsePage(ctx, st.ns, st.table, req)
-					return BrowsePageMsg{st: st, res: res, err: err}
-				}
+					st := st
+					return func() tea.Msg {
+						// The ctx lives inside the Cmd closure: a defer in dispatch
+						// fires the moment dispatch returns the command — before the
+						// runtime runs it — and BrowsePage received an already-cancelled
+						// context (green tests hid this: the fake ignores ctx).
+						ctx, cancel := context.WithTimeout(context.Background(), browsePageTimeout)
+						defer cancel()
+						res, err := bb.BrowsePage(ctx, st.ns, st.table, req)
+						return BrowsePageMsg{st: st, res: res, err: err}
+					}
 				}
 				// The pane is not a browsable table (a query result, a panel):
 				// there is no page walk to be "at the end of", so stay silent
