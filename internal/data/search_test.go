@@ -76,9 +76,15 @@ func TestSearchFuzzyColsFold(t *testing.T) {
 	}
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {
-			got := SearchFuzzyColsFold(f, tt.cols, tt.needle)
+			// 两条路径必须同判：cache 路径（searchbar 实际走的）与 nil-cache
+			// 纯函数路径（无缓存调用方）。
+			got := SearchFuzzyColsFold(f, tt.cols, tt.needle, nil)
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("SearchFuzzyColsFold(cols=%v, %q) = %v, want %v", tt.cols, tt.needle, got, tt.want)
+			}
+			var fc FoldCache
+			if cached := SearchFuzzyColsFold(f, tt.cols, tt.needle, &fc); !reflect.DeepEqual(cached, got) {
+				t.Errorf("cached path diverged: %v vs %v", cached, got)
 			}
 		})
 	}
@@ -86,7 +92,7 @@ func TestSearchFuzzyColsFold(t *testing.T) {
 	// 空子集必须与全帧模糊搜索逐条一致（同一匹配器、同一 hay 语义）。
 	for _, needle := range []string{"apie", "ban", "2", ""} {
 		full := SearchFuzzyFold(f, needle, nil)
-		degenerate := SearchFuzzyColsFold(f, nil, needle)
+		degenerate := SearchFuzzyColsFold(f, nil, needle, nil)
 		if !reflect.DeepEqual(full, degenerate) {
 			t.Errorf("empty cols diverged from full frame for %q: %v vs %v", needle, degenerate, full)
 		}

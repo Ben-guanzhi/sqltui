@@ -110,9 +110,10 @@ func (s *SearchBar) recompute() {
 	var rows []int
 	if len(s.searchCols) > 0 {
 		if s.fuzzy {
-			// 限定列 + 模糊：/ 在汇总视图（TableCols）上的真实语义——此前
-			// fuzzy 标志在此被忽略，帮助文案与行为不符。
-			rows = data.SearchFuzzyColsFold(s.base, s.searchCols, s.query)
+			// 限定列 + 模糊：/ 在汇总视图（TableCols）上的真实语义。子集
+			// hay 的折叠值与精确子集路径共用同一份 FoldCache——击键只变
+			// needle，第一键付折叠全价，之后只付拼接。
+			rows = data.SearchFuzzyColsFold(s.base, s.searchCols, s.query, &s.fold)
 		} else {
 			rows = data.SearchExactColsFold(s.base, s.searchCols, s.query, &s.fold)
 		}

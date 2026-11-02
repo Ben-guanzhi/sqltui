@@ -31,6 +31,9 @@ type Backend struct {
 	pageSize  int   // rows per page, default 200
 	startUS   int64 // cached query window start (microseconds); 0 = not yet initialized
 	endUS     int64 // cached query window end (microseconds)
+	lastHits  int   // hits the last FetchTable returned: 0-based end-of-data probe
+	// for the pager — a short (or empty) page means the walk is past the end
+	// (scan-based pagination has no total count to ask for).
 
 	// cancelReg tracks the SSE request in flight: a search streams until the
 	// server sends [[DONE]] and has no deadline of its own, so esc/ctrl+c is
@@ -95,6 +98,14 @@ func (b *Backend) GetPage() int {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return b.page
+}
+
+// LastHits returns how many hits the last FetchTable returned (0-based pager
+// probe: a short page means the next one would be empty).
+func (b *Backend) LastHits() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.lastHits
 }
 
 // GetPageSize returns the page size.
@@ -361,6 +372,12 @@ func (b *Backend) FetchTable(namespace, table string, limit int) (*data.Frame, e
 	if err != nil {
 		return nil, err
 	}
+	// Record the hit count for the pager's end-of-data probe. A failed fetch
+	// leaves the previous value: a stale probe can at worst allow one extra
+	// page turn, never block a legitimate one.
+	b.mu.Lock()
+	b.lastHits = len(hits)
+	b.mu.Unlock()
 	return buildFrame(metas, hits), nil
 }
 

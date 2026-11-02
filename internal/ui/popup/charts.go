@@ -500,30 +500,47 @@ func detectXY(data []map[string]any) (xCol, yCol string) {
 		}
 	}
 	// Pick yCol as the column with most numeric values (excluding _timestamp).
-	bestNumericScore := 0
-	for k, n := range colNumeric {
+	// Candidate lists are sorted first: picking "the first key with the best
+	// score" over a Go map iterates in randomized order, so the same data
+	// could plot different axes between runs.
+	yCandidates := make([]string, 0, len(colNumeric))
+	for k := range colNumeric {
 		if k == "_timestamp" {
 			continue
 		}
-		if n > bestNumericScore {
+		yCandidates = append(yCandidates, k)
+	}
+	sort.Strings(yCandidates)
+	bestNumericScore := 0
+	for _, k := range yCandidates {
+		if n := colNumeric[k]; n > bestNumericScore {
 			bestNumericScore = n
 			yCol = k
 		}
 	}
-	// Pick xCol as the non-numeric, non-timestamp column.
+	// Pick xCol as the non-numeric, non-timestamp column — first in sorted
+	// order, not first in map order.
+	xCandidates := make([]string, 0, len(colTotal))
 	for k := range colTotal {
 		if k != yCol && k != "_timestamp" {
-			xCol = k
-			break
+			xCandidates = append(xCandidates, k)
 		}
+	}
+	sort.Strings(xCandidates)
+	if len(xCandidates) > 0 {
+		xCol = xCandidates[0]
 	}
 	if xCol == "" && yCol != "" {
 		// Use _timestamp or first col as x.
+		fallback := make([]string, 0, len(colTotal))
 		for k := range colTotal {
 			if k != yCol {
-				xCol = k
-				break
+				fallback = append(fallback, k)
 			}
+		}
+		sort.Strings(fallback)
+		if len(fallback) > 0 {
+			xCol = fallback[0]
 		}
 	}
 	return xCol, yCol

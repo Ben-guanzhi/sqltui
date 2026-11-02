@@ -1064,6 +1064,13 @@ func (a *App) dispatch(action, key string) tea.Cmd {
 	case ActNextPage:
 		if a.backend != nil {
 			if oobe, ok := a.backend.(db.Paged); ok {
+				// End-of-data probe: the last fetch came back short, so the
+				// next offset is past the end — walking there issues a full
+				// SSE round trip that returns nothing, silently. The probe
+				// is 0 before the first fetch; that must not block paging.
+				if h := oobe.LastHits(); h > 0 && h < oobe.GetPageSize() {
+					return a.setToast("已是最后一页")
+				}
 				oobe.SetPage(oobe.GetPage() + 1)
 				return a.runCommand("refreshtable", "")
 			}

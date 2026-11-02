@@ -288,9 +288,13 @@ func SearchFuzzyFold(f *Frame, needle string, cache *FuzzyCache) []int {
 // SearchFuzzyColsFold 模糊匹配限定列子集：任一子集列的单元格内容按
 // 子序列命中即整行命中。hay 与全帧 joinFrameRows 同一空格连接语义、
 // 仅拼接子集列，匹配器复用 fuzzyMatchIndices（判据同一份、由差分测试
-// 锁定）。空子集退化为全帧模糊搜索；不走过期缓存——汇总视图列数少，
-// 每次击键重建 hay 的成本可忽略。
-func SearchFuzzyColsFold(f *Frame, cols []int, needle string) []int {
+// 锁定）。空子集退化为全帧模糊搜索。
+//
+// hay 的构建走 cache 的折叠值（与精确搜索同一份 FoldCache）：击键只变
+// needle 不变帧，折叠贵（非 ASCII 逐 rune 查表）而拼接便宜——第一键付
+// 折叠的全价，之后的键只付 Θ(行) 的拼接。cache 为 nil（纯函数调用方）
+// 时按老路现场构建，行为不变。
+func SearchFuzzyColsFold(f *Frame, cols []int, needle string, cache *FoldCache) []int {
 	rows := f.NumRows()
 	if needle == "" {
 		all := make([]int, rows)
@@ -302,17 +306,45 @@ func SearchFuzzyColsFold(f *Frame, cols []int, needle string) []int {
 	if len(cols) == 0 {
 		return SearchFuzzyFold(f, needle, nil)
 	}
+	var hay []string
+	if cache != nil {
+		folded := cache.lookup(f, cols)
+		if folded == nil && rows*len(cols) <= foldCacheMaxCells {
+			folded = cache.build(f, cols)
+		}
+		if folded != nil {
+			hay = joinFoldedSubset(f, cols, folded)
+		}
+	}
+	if hay == nil {
+		hay = joinFoldedSubset(f, cols, nil)
+	}
+	return fuzzyMatchIndices(needle, hay)
+}
+
+// joinFoldedSubset builds the subset haystack. folded carries the per-column
+// lowercase cell columns from the cache (nil = read the frame raw). A stale
+// parts[i] must not survive into the next row: the reset happens BEFORE the
+// validity check, so an out-of-range column index leaves that part empty
+// instead of bleeding the previous row's value into this row's haystack.
+func joinFoldedSubset(f *Frame, cols []int, folded [][]string) []string {
+	rows := f.NumRows()
 	hay := make([]string, rows)
 	parts := make([]string, len(cols))
 	for r := 0; r < rows; r++ {
 		for i, c := range cols {
+			parts[i] = ""
 			if c >= 0 && c < len(f.Columns) {
-				parts[i] = f.CellString(r, c)
+				if folded != nil && folded[i] != nil {
+					parts[i] = folded[i][r]
+				} else {
+					parts[i] = f.CellString(r, c)
+				}
 			}
 		}
 		hay[r] = strings.Join(parts, " ")
 	}
-	return fuzzyMatchIndices(needle, hay)
+	return hay
 }
 
 // fuzzyMatchIndices 按行判定"中/不中"，按帧序返回索引。判据与 fuzzy.Find 逐位
