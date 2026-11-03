@@ -1,6 +1,7 @@
 package popup
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -114,6 +115,32 @@ func TestPaletteFilterFuzzy(t *testing.T) {
 	}
 	if got := paletteFilter("zzzzqx"); len(got) != 0 {
 		t.Fatalf("nonsense pattern matched %v", got)
+	}
+}
+
+// TestPaletteFilterDeterministic is the K-F3 contract for the palette: the
+// same pattern must always yield the same hit order. The corpus is built from
+// the Commands display table in order (name first, then aliases), and
+// fuzzy.FindFrom scores deterministically — this pins both so a corpus
+// reordering or a matcher change cannot silently reshuffle the list.
+func TestPaletteFilterDeterministic(t *testing.T) {
+	patterns := []string{"", "q", "f", "theme", "palette", "zzzzqx", ":f price"}
+	for _, p := range patterns {
+		a := paletteFilter(p)
+		b := paletteFilter(p)
+		if !reflect.DeepEqual(a, b) {
+			t.Errorf("paletteFilter(%q) drifted: %v vs %v", p, a, b)
+		}
+	}
+	// Golden pin: the empty filter returns the whole table in display order,
+	// so the corpus construction order itself is part of the contract.
+	got := paletteFilter("")
+	want := make([]int, len(Commands))
+	for i := range want {
+		want[i] = i
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("empty filter = %v, want table order 0..%d", got, len(Commands)-1)
 	}
 }
 
