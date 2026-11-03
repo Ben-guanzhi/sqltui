@@ -75,12 +75,30 @@ type paletteEntry struct {
 	cmd  int // index into Commands
 }
 
-// buildPaletteCorpus lists every registered name and alias once. Rebuilt on
-// each palette open instead of frozen in a package-level var: dbmode
-// registers "connect"/"opentable" at RUNTIME (dbmode.Run, after all package
-// init), and a var initializer snapshot predating those left the palette
-// unable to fuzzy-find them even though help listed them.
+// corpusCache memoizes buildPaletteCorpus between keystrokes: the corpus is a
+// pure function of the Commands table, whose only mutation point is
+// RegisterCommand (idempotent by name) — so len(Commands) is a complete
+// version key. First keystroke pays the build; later ones reuse the slice.
+// A shrinking table is impossible (no unregister), so a length key cannot
+// serve a stale corpus.
+var corpusCache = struct {
+	n     int
+	ready bool
+	es    []paletteEntry
+}{n: -1}
+
+// buildPaletteCorpus lists every registered name and alias once, memoized on
+// the Commands length (K-3). Rebuilt lazily rather than frozen in a
+// package-level var: dbmode registers "connect"/"opentable" at RUNTIME
+// (dbmode.Run, after all package init), and a var initializer snapshot
+// predating those left the palette unable to fuzzy-find them even though help
+// listed them. Memoization preserves that lazy semantics — the cache is empty
+// until the first use after each registration, and RegisterCommand's
+// idempotency means a no-op register never invalidates.
 func buildPaletteCorpus() []paletteEntry {
+	if corpusCache.ready && corpusCache.n == len(Commands) {
+		return corpusCache.es
+	}
 	es := make([]paletteEntry, 0, len(Commands))
 	for i, c := range Commands {
 		es = append(es, paletteEntry{text: c.Name, cmd: i})
@@ -88,6 +106,11 @@ func buildPaletteCorpus() []paletteEntry {
 			es = append(es, paletteEntry{text: a, cmd: i})
 		}
 	}
+	corpusCache = struct {
+		n     int
+		ready bool
+		es    []paletteEntry
+	}{n: len(Commands), ready: true, es: es}
 	return es
 }
 

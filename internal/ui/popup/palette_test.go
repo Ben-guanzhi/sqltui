@@ -297,3 +297,34 @@ func TestPaletteCorpusIncludesRuntimeRegistrations(t *testing.T) {
 		t.Fatal("paletteFilter found no match for a runtime-registered command")
 	}
 }
+
+// K-3: 语料按 Commands 长度 memoize——同一长度复用同一切片（身份相等），
+// 注册新命令后立即失效重建。懒注册语义（上一个测试）由"注册改变长度"保证。
+func TestPaletteCorpusMemoizedOnCommandCount(t *testing.T) {
+	const probe = "palette-memo-probe"
+	RegisterCommand(Command{Name: probe, Description: "memo probe"},
+		func(ctx ui.AppContext, arg string) (ui.Overlay, error) {
+			return nil, nil
+		})
+
+	first := buildPaletteCorpus()
+	second := buildPaletteCorpus()
+	if len(first) != len(second) {
+		t.Fatalf("corpus length changed without registration: %d vs %d", len(first), len(second))
+	}
+	if &first[0] != &second[0] {
+		t.Error("same command count must reuse the cached corpus (no rebuild)")
+	}
+
+	RegisterCommand(Command{Name: probe + "-2", Description: "memo probe 2"},
+		func(ctx ui.AppContext, arg string) (ui.Overlay, error) {
+			return nil, nil
+		})
+	third := buildPaletteCorpus()
+	if len(third) == len(first) {
+		t.Fatal("a new registration must invalidate the memoized corpus")
+	}
+	if _, ok := paletteResolve(probe + "-2"); !ok {
+		t.Fatal("rebuilt corpus does not resolve the new command")
+	}
+}
