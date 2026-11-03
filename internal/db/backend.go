@@ -97,15 +97,17 @@ type TimeRanger interface {
 }
 
 // Paged reports and navigates paginated results. LastHits is the pager's
-// end-of-data probe: how many rows the last fetch returned (a short page
-// means the next offset is past the end — scan-based pagination has no total
-// to ask for). Zero before the first fetch, so it must not block paging.
+// end-of-data probe: how many rows the last fetch returned (a page short of
+// the page size means the next offset is past the end — scan-based pagination
+// has no total to ask for). Zero before the first fetch, so it must not block
+// paging; Fetched separates that initial state from a real empty page.
 type Paged interface {
 	GetPage() int
 	SetPage(page int)
 	GetPageSize() int
 	SetPageSize(pageSize int)
 	LastHits() int
+	Fetched() bool
 }
 
 // QueryParamsSetter bundles TimeRanger and Paged: the capabilities needed to

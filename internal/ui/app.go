@@ -1064,11 +1064,13 @@ func (a *App) dispatch(action, key string) tea.Cmd {
 	case ActNextPage:
 		if a.backend != nil {
 			if oobe, ok := a.backend.(db.Paged); ok {
-				// End-of-data probe: the last fetch came back short, so the
-				// next offset is past the end — walking there issues a full
-				// SSE round trip that returns nothing, silently. The probe
-				// is 0 before the first fetch; that must not block paging.
-				if h := oobe.LastHits(); h > 0 && h < oobe.GetPageSize() {
+				// End-of-data probe: the last fetch came back short — a page
+				// short of the page size, including an empty one — so the next
+				// offset is past the end. Walking there issues a full SSE round
+				// trip that returns nothing, silently. The probe is 0 before
+				// the first fetch, so Fetched keeps that initial state from
+				// blocking paging; any later zero is a real empty page.
+				if oobe.Fetched() && oobe.LastHits() < oobe.GetPageSize() {
 					return a.setToast("已是最后一页")
 				}
 				oobe.SetPage(oobe.GetPage() + 1)
