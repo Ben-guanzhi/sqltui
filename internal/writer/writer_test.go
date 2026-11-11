@@ -184,3 +184,31 @@ func TestMarkdownBackslashPipeRoundtrip(t *testing.T) {
 		}
 	}
 }
+
+// TestCSVCustomQuote 钉住 Options.Quote 必须真正生效：默认双引号走 encoding/csv
+// （Go 1.27 的 Writer 已无 Use 字段），自定义引号必须走本地 RFC 4180 序列化。
+// 若只声明不赋值，自定义引号会被静默忽略。
+func TestCSVCustomQuote(t *testing.T) {
+	f := &data.Frame{Columns: []data.Column{
+		data.NewColumn("a", data.TypeString, []any{"x,y", `a'b,c`}),
+		data.NewColumn("b", data.TypeString, []any{`it's`, "plain"}),
+	}}
+	w, err := writer.For(writer.FormatCSV)
+	if err != nil {
+		t.Fatal(err)
+	}
+	opt := writer.Options{Separator: ',', Quote: '\'', Header: true}
+	buf := &bytes.Buffer{}
+	if err := w.Write(buf, f, opt); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	// 含分隔符或自定义引号的字段用单引号包裹，字段内的单引号双写转义。
+	want := "a,b\n'x,y','it''s'\n'a''b,c',plain\n"
+	if got != want {
+		t.Errorf("custom quote mismatch\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+	if strings.Contains(got, `"x,y"`) {
+		t.Errorf("default double quote still used:\n%s", got)
+	}
+}

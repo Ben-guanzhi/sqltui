@@ -58,9 +58,10 @@ var (
 )
 
 // Connect opens a mysql connection through the kernel and pings it before
-// returning.
-func Connect(cfg Config) (*Backend, error) {
-	drv, err := dbcore.Open(context.Background(), cfg.ConnSpec(), dbcore.PoolConfig{})
+// returning. The context bounds the dial, so the UI can cancel an in-flight
+// connect on exit instead of leaving the kernel dial running in the background.
+func Connect(ctx context.Context, cfg Config) (*Backend, error) {
+	drv, err := dbcore.Open(ctx, cfg.ConnSpec(), dbcore.PoolConfig{})
 	if err != nil {
 		return nil, err
 	}

@@ -121,7 +121,7 @@ next:
 			if s == "" {
 				continue
 			}
-			if !quickReject(s, t) {
+			if !isProbablyParsable(s, t) {
 				continue next
 			}
 			if _, ok := ParseAs(s, t); !ok {
@@ -136,9 +136,17 @@ next:
 	return TypeString, false
 }
 
-// quickReject reports whether s obviously cannot parse as t, allowing
-// detectColumnType to skip the more expensive parseAs call.
-func quickReject(s string, t DType) bool {
+// isProbablyParsable reports whether s could possibly parse as t, allowing
+// detectColumnType to skip the more expensive ParseAs call. It returns true
+// when the string looks like it might be this type (not rejected yet), and
+// false when it is clearly not.
+//
+// The float branch accepts a strict decimal-or-scientific shape, not anything
+// ParseFloat takes: delegating to strconv.ParseFloat also accepted hex floats
+// (0x1p4), Go-style underscore literals (1_000) and the text tokens
+// NaN/Inf/Infinity — so a column of SKUs or accounting text like "1_000"
+// silently became float64 and lost its text form.
+func isProbablyParsable(s string, t DType) bool {
 	switch t {
 	case TypeInt:
 		if s[0] == '-' || s[0] == '+' {
@@ -154,28 +162,52 @@ func quickReject(s string, t DType) bool {
 		}
 		return true
 	case TypeFloat:
-		if s[0] == '-' || s[0] == '+' {
-			s = s[1:]
-		}
-		if s == "" {
-			return false
-		}
-		dotSeen := false
-		for i := 0; i < len(s); i++ {
-			c := s[i]
-			if c == '.' {
-				if dotSeen {
-					return false
-				}
-				dotSeen = true
-			} else if c < '0' || c > '9' {
-				return false
-			}
-		}
-		return true
+		return floatLike(s)
 	default:
 		return true
 	}
+}
+
+// floatLike reports whether s is a decimal number, optionally in scientific
+// notation: [sign]digits[.digits][eE[sign]digits]. Hex floats, underscore
+// literals and the NaN/Inf tokens do not match — ParseAs rejects them anyway,
+// so admitting them here would only corrupt the inferred type.
+func floatLike(s string) bool {
+	i := 0
+	if i < len(s) && (s[i] == '-' || s[i] == '+') {
+		i++
+	}
+	digits := 0
+	for i < len(s) && s[i] >= '0' && s[i] <= '9' {
+		i++
+		digits++
+	}
+	if i < len(s) && s[i] == '.' {
+		i++
+		for i < len(s) && s[i] >= '0' && s[i] <= '9' {
+			i++
+			digits++
+		}
+	}
+	if digits == 0 {
+		return false // ".e5", "-", "" — no mantissa digits at all
+	}
+	if i == len(s) {
+		return true // plain decimal
+	}
+	if s[i] != 'e' && s[i] != 'E' {
+		return false // trailing garbage ("1_000", "0x1p4", "NaN", "Inf")
+	}
+	i++
+	if i < len(s) && (s[i] == '-' || s[i] == '+') {
+		i++
+	}
+	expDigits := 0
+	for i < len(s) && s[i] >= '0' && s[i] <= '9' {
+		i++
+		expDigits++
+	}
+	return expDigits > 0 && i == len(s)
 }
 
 // convertCells converts every cell to type t. Nulls and empty strings become

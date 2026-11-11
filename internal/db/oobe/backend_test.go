@@ -61,3 +61,23 @@ func TestTableTarget(t *testing.T) {
 		t.Errorf("target = %s, want \"streams\" (namespace lives in the URL, not the SQL)", got)
 	}
 }
+
+// Close is the inverse of Connect's HTTP client acquisition: it must release
+// the idle keep-alive pool rather than be a no-op, and be safe to repeat.
+func TestBackendCloseReleasesClient(t *testing.T) {
+	b := &Backend{client: newHTTPClient("localhost", "5080", "u", "p")}
+	if err := b.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if err := b.Close(); err != nil {
+		t.Fatalf("second Close: %v", err)
+	}
+}
+
+// A nil client must not panic: a Backend built without Connect still satisfies
+// the contract.
+func TestBackendCloseNilClient(t *testing.T) {
+	if err := (&Backend{}).Close(); err != nil {
+		t.Fatalf("Close on nil client: %v", err)
+	}
+}

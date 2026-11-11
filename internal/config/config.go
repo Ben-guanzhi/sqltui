@@ -398,12 +398,50 @@ func readSqlConfig() SqlConfig {
 	return tmpConf
 }
 
+// writeFileAtomic 先把内容完整写入目标同目录下的临时文件，再 os.Rename
+// 原子替换目标。os.WriteFile 会先 truncate 再写，一旦中途崩溃，含明文 DB
+// 口令的配置文件会被截断/清空；临时文件+重命名保证目标要么是旧内容、要么是
+// 完整新内容，绝无中间态（参考 internal/ui/popup/exporter.go 的原子导出）。
+func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
+	dir, base := filepath.Dir(path), filepath.Base(path)
+	tmp, err := os.CreateTemp(dir, base+".tmp-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	committed := false
+	defer func() {
+		if !committed {
+			_ = os.Remove(tmpName)
+		}
+	}()
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Chmod(tmpName, perm); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		return err
+	}
+	committed = true
+	return nil
+}
+
 func writeSqlConfig(tmpConf SqlConfig) error {
 	y, err := yaml.Marshal(&tmpConf)
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(ConfigFile, y, 0600)
+	return writeFileAtomic(ConfigFile, y, 0600)
 }
 
 func SetDefaultLog() error {
@@ -440,7 +478,7 @@ func updateSection(fn func(*SqlConfig)) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(ConfigFile, out, 0600)
+	return writeFileAtomic(ConfigFile, out, 0600)
 }
 
 // ReadOobeSummaryColumns returns the user-configured OpenObserve summary columns.

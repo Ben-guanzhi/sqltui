@@ -1,9 +1,11 @@
 package popup
 
 import (
+	"context"
 	"errors"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/LinPr/sqltui/internal/ui"
 )
@@ -16,7 +18,7 @@ func TestEditFactoryNoFrame(t *testing.T) {
 
 func TestEditEditorCmd(t *testing.T) {
 	t.Setenv("EDITOR", "myeditor --wait")
-	cmd := editEditorCmd("/tmp/f.csv")
+	cmd := editEditorCmd(context.Background(), "/tmp/f.csv")
 	want := []string{"myeditor", "--wait", "/tmp/f.csv"}
 	if len(cmd.Args) != len(want) {
 		t.Fatalf("args = %v, want %v", cmd.Args, want)
@@ -28,7 +30,7 @@ func TestEditEditorCmd(t *testing.T) {
 	}
 
 	t.Setenv("EDITOR", "")
-	cmd = editEditorCmd("/tmp/f.csv")
+	cmd = editEditorCmd(context.Background(), "/tmp/f.csv")
 	if cmd.Args[0] != "vi" {
 		t.Fatalf("fallback editor = %q, want vi", cmd.Args[0])
 	}
@@ -136,4 +138,24 @@ func TestEditOnDoneErrors(t *testing.T) {
 	}() {
 		t.Fatalf("got %#v, want ErrorMsg", m)
 	}
+}
+
+// TestKillRunningEditors pins the ST-07 inverse: the UI exit hook cancels a
+// tracked editor context (exec.CommandContext turns that into a process kill)
+// and is idempotent.
+func TestKillRunningEditors(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	id := trackEditor(cancel, t.TempDir()+"/nonexistent-edit.csv")
+
+	killRunningEditors()
+	select {
+	case <-ctx.Done():
+	case <-time.After(2 * time.Second):
+		t.Fatal("killRunningEditors did not cancel the tracked editor")
+	}
+
+	// Untracking and a second kill are both no-ops.
+	untrackEditor(id)
+	killRunningEditors()
 }

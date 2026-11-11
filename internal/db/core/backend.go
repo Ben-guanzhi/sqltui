@@ -103,11 +103,11 @@ func (b *Backend) Run(stmt string) (db.Result, error) {
 	return b.RunBound(stmt, nil)
 }
 
-// AdHocRowLimit caps one ad-hoc query's materialized rows. A bare
-// `SELECT *` used to append every row of the table into memory
-// (FrameFromResult); table fetches already cap at TableFetchLimit, the query
-// path had no ceiling at all. A visible truncation marker in the TUI is UI work (the frame shape
-// carries none); the cap itself is the same convention TableFetchLimit uses.
+// AdHocRowLimit caps one ad-hoc query's materialized rows. The kernel's
+// rowsToResult now stops reading at dbcore.DriverMaxRows (the same number) and
+// marks Truncated/TotalRows, so the memory is bounded by the reader, not
+// trimmed after the fact — the old slice-here approach only hid the tail while
+// the kernel had already allocated a row for every row in the table.
 const AdHocRowLimit = 10000
 
 // RunBound is Run with bound parameters: values ride as driver arguments
@@ -130,15 +130,9 @@ func (b *Backend) RunBound(stmt string, args []any) (db.Result, error) {
 	if err != nil {
 		return db.Result{}, err
 	}
-	truncated := false
-	if len(res.Rows) > AdHocRowLimit {
-		res.Rows = res.Rows[:AdHocRowLimit]
-		// Mark the truncation: a silent cut looks like a complete result,
-		// and the user would export or trust the frame unaware rows were
-		// dropped. The consumer (qxRunCmd) turns this into a visible toast.
-		truncated = true
-	}
-	if truncated {
+	// The kernel already stopped reading at DriverMaxRows (== AdHocRowLimit)
+	// and flagged it; honor the flag instead of re-slicing.
+	if res.Truncated {
 		out := b.result(res)
 		out.Truncated = true
 		return out, nil
@@ -413,17 +407,45 @@ const (
 // rides as text. The declared type decides, not the value: a VARCHAR primary
 // key holding "123" must bind as text, or PostgreSQL rejects
 // "character varying > integer".
+//
+// Uses exact name matching after stripping the length/precision specifier
+// (`INT(11)` → `INT`): the old `strings.Contains` check classified `INTERVAL`
+// as int because it contains `INT`, and `DATE`/`TIMESTAMP` fell through to
+// text. Exact matching avoids both.
 func classifyCursorType(colType string) cursorClass {
-	upper := strings.ToUpper(colType)
-	for _, t := range []string{"INT", "INT2", "INT4", "INT8", "BIGINT", "SMALLINT", "TINYINT", "MEDIUMINT"} {
-		if strings.Contains(upper, t) {
-			return cursorInt
-		}
+	// Strip the length/precision specifier: `VARCHAR(255)` → `VARCHAR`,
+	// `DECIMAL(10,2)` → `DECIMAL`.
+	base := colType
+	if i := strings.IndexByte(base, '('); i >= 0 {
+		base = base[:i]
 	}
-	for _, t := range []string{"REAL", "FLOAT", "DOUBLE", "NUMERIC", "DECIMAL"} {
-		if strings.Contains(upper, t) {
-			return cursorFloat
+	base = strings.ToUpper(strings.TrimSpace(base))
+	// Strip modifier words like `UNSIGNED` / `ZEROFILL`.
+	for {
+		sp := strings.LastIndexByte(base, ' ')
+		if sp < 0 {
+			break
 		}
+		if base[sp+1:] == "UNSIGNED" || base[sp+1:] == "ZEROFILL" {
+			base = base[:sp]
+			continue
+		}
+		break
+	}
+	switch base {
+	case "INT", "INT2", "INT4", "INT8", "BIGINT", "SMALLINT", "TINYINT", "MEDIUMINT",
+		"SERIAL", "BIGSERIAL", "INTEGER":
+		return cursorInt
+	case "REAL", "FLOAT", "FLOAT4", "FLOAT8", "DOUBLE", "NUMERIC", "DECIMAL",
+		"MONEY", "BINARY_DOUBLE", "BINARY_FLOAT":
+		return cursorFloat
+	}
+	// Oracle's NUMBER is its dominant numeric type, and PostgreSQL spells
+	// float8 as the two-word "double precision" — both must bind as numbers,
+	// or a keyset continuation fails with "operator does not exist:
+	// double precision > text" / relies on lossy implicit conversion.
+	if base == "NUMBER" || base == "DOUBLE PRECISION" {
+		return cursorFloat
 	}
 	return cursorText
 }

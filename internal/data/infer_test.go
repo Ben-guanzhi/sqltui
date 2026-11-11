@@ -163,6 +163,29 @@ func TestInferFrameNoMode(t *testing.T) {
 	}
 }
 
+// A float column carrying scientific notation must infer as TypeFloat, not
+// TypeString: the original pattern check only matched [sign]digits[.digits]
+// and rejected 1e5, so a numeric column lost its type. The tokens inf/nan must
+// NOT be admitted: ParseAs rejects them anyway, and admitting them would let
+// a column of status text ("NaN") become float64.
+func TestInferFrameFloatScientificNotation(t *testing.T) {
+	f := frameOf(strCol("n", "1e5", "2.5e-3", "-1.5E+10", "42"))
+	out := InferFrame(f, "safe", nil)
+	if out.Columns[0].Type != TypeFloat {
+		t.Errorf("scientific-notation column type = %v, want TypeFloat", out.Columns[0].Type)
+	}
+}
+
+// Tokens ParseFloat accepts but a data column should never become floats for:
+// hex floats, underscore literals, and the NaN/Inf text. These stay strings.
+func TestInferFrameFloatRejectsNonDecimalShapes(t *testing.T) {
+	f := frameOf(strCol("n", "NaN", "Inf", "1_000", "0x1p4"))
+	out := InferFrame(f, "safe", nil)
+	if out.Columns[0].Type != TypeString {
+		t.Errorf("non-decimal tokens type = %v, want TypeString", out.Columns[0].Type)
+	}
+}
+
 func TestInferFrameSkipsTypedColumns(t *testing.T) {
 	col := Column{Name: "n", Type: TypeInt, cells: []any{int64(1)}}
 	out := InferFrame(frameOf(col), "safe", []string{"all"})

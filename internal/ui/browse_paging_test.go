@@ -256,3 +256,115 @@ func TestBrowsePageContextAliveInsideCmd(t *testing.T) {
 		t.Fatalf("context was already cancelled when the Cmd ran: %v", bb.ctxErr)
 	}
 }
+
+// TestBrowsePagingSameTableTwoTabs pins that two tabs on the SAME table carry
+// independent walk cursors. The browse map used to key on ns|table only, so
+// opening the table twice overwrote the state: tab A's ">" advanced the shared
+// cursor, and tab B's next page (or A's, after switching) jumped — cross-tab
+// cursor corruption with no error. The key now includes the pane id.
+func TestBrowsePagingSameTableTwoTabs(t *testing.T) {
+	bb := &fakeBrowseBackend{}
+	a := New(Options{
+		Frames:  []reader.NamedFrame{{Name: "t", Frame: testFrame(2)}},
+		Backend: bb,
+	})
+	a.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+
+	// Two tabs on the same table (New() seeds one tab from Frames, so the two
+	// ApplyFrameMsg calls land as tabs 1 and 2; tab 0 is the plain "t" frame).
+	a.Update(ApplyFrameMsg{
+		Frame:           testFrame(2),
+		NewTab:          true,
+		TabTitle:        "orders",
+		SourceNamespace: "sales",
+		SourceTable:     "orders",
+	})
+	a.Update(ApplyFrameMsg{
+		Frame:           testFrame(2),
+		NewTab:          true,
+		TabTitle:        "orders",
+		SourceNamespace: "sales",
+		SourceTable:     "orders",
+	})
+	if len(a.tabs) != 3 {
+		t.Fatalf("tabs = %d, want 3 (1 seeded + 2 table tabs)", len(a.tabs))
+	}
+
+	// The second tab is active; its state must be its own, page 1, not done —
+	// NOT the first tab's state re-seeded under the same key.
+	st2 := a.activeBrowse()
+	if st2 == nil {
+		t.Fatal("second tab's browse state not seeded")
+	}
+	if st2.page != 1 || st2.done {
+		t.Fatalf("second tab walk = page %d done %v, want fresh page 1", st2.page, st2.done)
+	}
+	if st2.paneID != a.pane().ID() {
+		t.Fatalf("second tab state paneID = %d, want active pane %d", st2.paneID, a.pane().ID())
+	}
+
+	// Advance tab 2, then switch to tab 1: tab 1's walk must still be at its
+	// own page 1 — the shared-key overwrite used to make this state stale or
+	// advanced.
+	_, cmd := a.Update(key(">"))
+	if cmd == nil {
+		t.Fatal("ActNextPage returned no command on tab 2")
+	}
+	msg := cmd()
+	pm, ok := msg.(BrowsePageMsg)
+	if !ok {
+		t.Fatalf("cmd returned %T, want BrowsePageMsg", msg)
+	}
+	a.Update(pm)
+
+	// Switch back to the FIRST table tab (tab 1; tab 0 is the seeded plain
+	// "t" frame with no table source). Its walk must still be at its own
+	// page 1 — the shared-key overwrite used to make this state stale or
+	// advanced.
+	a.Update(JumpToTabMsg{Index: 1})
+	st1 := a.activeBrowse()
+	if st1 == nil {
+		t.Fatal("first tab's browse state vanished after tab 2 advanced")
+	}
+	if st1.paneID == st2.paneID {
+		t.Fatal("both tabs share one browse state: key collision")
+	}
+	if st1.page != 1 || st1.done {
+		t.Fatalf("first tab walk = page %d done %v, want untouched page 1", st1.page, st1.done)
+	}
+}
+
+// TestCloseTabWithdrawsBrowseState pins the ST-05 per-tab inverse: closing a
+// table tab removes the browse window it seeded. The connection itself is
+// app-level and must survive (other tabs still use it), so the inverse is the
+// per-tab registration, not the connection.
+func TestCloseTabWithdrawsBrowseState(t *testing.T) {
+	bb := &fakeBrowseBackend{}
+	a := New(Options{
+		Frames:  []reader.NamedFrame{{Name: "t", Frame: testFrame(2)}},
+		Backend: bb,
+	})
+	a.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	a.Update(ApplyFrameMsg{
+		Frame:           testFrame(2),
+		NewTab:          true,
+		TabTitle:        "orders",
+		SourceNamespace: "sales",
+		SourceTable:     "orders",
+	})
+
+	closed := a.pane()
+	key := a.browseKey(closed)
+	if a.browse[key] == nil {
+		t.Fatal("browse state not seeded before close")
+	}
+
+	a.Update(CloseTabMsg{Index: 1})
+	if _, ok := a.browse[key]; ok {
+		t.Fatal("closing a tab left its browse window registered")
+	}
+	// The app-level connection is untouched by a single-tab close.
+	if a.backend == nil {
+		t.Fatal("single-tab close must not drop the app-level connection")
+	}
+}

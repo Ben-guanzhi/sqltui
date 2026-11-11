@@ -92,14 +92,15 @@ var (
 )
 
 // Connect opens a redis connection through the kernel and pings it before
-// returning.
-func Connect(cfg Config) (*Backend, error) {
+// returning. The context bounds the dial, so the UI can cancel an in-flight
+// connect on exit instead of leaving the kernel dial running in the background.
+func Connect(ctx context.Context, cfg Config) (*Backend, error) {
 	rdbNum, err := strconv.Atoi(strings.TrimSpace(cfg.RdbNum))
 	if err != nil {
 		return nil, fmt.Errorf("invalid redis db number %q: %w", cfg.RdbNum, err)
 	}
 	spec := cfg.ConnSpec()
-	drv, err := dbcore.Open(context.Background(), spec, dbcore.PoolConfig{})
+	drv, err := dbcore.Open(ctx, spec, dbcore.PoolConfig{})
 	if err != nil {
 		return nil, err
 	}

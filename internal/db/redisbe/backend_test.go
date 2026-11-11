@@ -1,6 +1,7 @@
 package redisbe
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -18,7 +19,7 @@ func TestConnectRejectsInvalidDbNumber(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := Connect(Config{Host: "127.0.0.1", Port: "6379", RdbNum: tt.rdbNum})
+			_, err := Connect(context.Background(), Config{Host: "127.0.0.1", Port: "6379", RdbNum: tt.rdbNum})
 			if err == nil {
 				t.Fatal("expected error for invalid db number")
 			}
@@ -44,7 +45,7 @@ func TestFormatJson(t *testing.T) {
 func newTestBackend(t *testing.T) *Backend {
 	t.Helper()
 	s := miniredis.RunT(t)
-	be, err := Connect(Config{Host: s.Host(), Port: s.Port(), RdbNum: "0"})
+	be, err := Connect(context.Background(), Config{Host: s.Host(), Port: s.Port(), RdbNum: "0"})
 	if err != nil {
 		t.Fatalf("Connect: %v", err)
 	}

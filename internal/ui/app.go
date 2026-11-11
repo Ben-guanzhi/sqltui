@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"runtime/debug"
+	"strconv"
 	"strings"
 	"time"
 
@@ -144,21 +145,48 @@ var onBackendChanged func()
 // SetOnBackendChanged installs the backend-switch hook (nil clears it).
 func SetOnBackendChanged(fn func()) { onBackendChanged = fn }
 
+// exitHooks run once when the app exits, before the live connections are
+// closed. Integrations that own work outside the app's own connection
+// lifecycle (a kernel dial still in flight, an external editor) register here
+// so a UI quit cannot orphan it: the hook cancels the work, then the
+// connection teardown releases whatever the work may have installed.
+var exitHooks []func()
+
+// RegisterExitHook installs a callback to run on app exit (normal or panic).
+// It is the inverse-operation seam for resources the App struct does not own;
+// callers should make the callback idempotent.
+func RegisterExitHook(fn func()) {
+	if fn != nil {
+		exitHooks = append(exitHooks, fn)
+	}
+}
+
+// closeExitResources runs the integration exit hooks and then closes the
+// app's live connections. Hooks run first so an in-flight dial is cancelled
+// before the connection it might install is torn down (LIFO).
+func (a *App) closeExitResources() {
+	for _, fn := range exitHooks {
+		fn()
+	}
+	a.CloseConnections()
+}
+
 // Run drives the app to completion on the terminal. Whatever live
 // connections the app owns are closed when the program returns, so every
 // exit path (last tab closed, quit, crash-recoverable return) drops them.
 func Run(app *App) (err error) {
-	// defer 的注册顺序是执行的倒序：panic 时先跑 CloseConnections（注册在后、
-	// 先执行），再由 recover 把 panic 转成带栈的错误。此前的顺序调用在 panic
-	// 路径会跳过清理，与"every exit path drops them"矛盾；裸 panic 还会把
-	// 终端留在备用屏里没有交代。
+	// defer 的注册顺序是执行的倒序：panic 时先跑 closeExitResources（注册在后、
+	// 先执行）——它先取消仍在飞行的拨号/编辑器，再关闭连接，最后由 recover
+	// 把 panic 转成带栈的错误。此前的顺序调用在 panic 路径会跳过清理，与
+	// "every exit path drops them"矛盾；裸 panic 还会把终端留在备用屏里没有
+	// 交代。
 	defer func() {
 		if r := recover(); r != nil {
-			app.CloseConnections()
+			app.closeExitResources()
 			err = fmt.Errorf("internal error: %v\n%s", r, debug.Stack())
 		}
 	}()
-	defer app.CloseConnections()
+	defer app.closeExitResources()
 	_, err = tea.NewProgram(app).Run()
 	return err
 }
@@ -1514,13 +1542,22 @@ func (a *App) applyFrame(m ApplyFrameMsg) tea.Cmd {
 	return nil
 }
 
+// browseKey 是 browse map 的键。必须带 paneID：browseState 的游标
+// （st.after/page/done）是**每个标签各自**的翻页进度，而 ns|table 只能
+// 唯一到"哪张表"——同一张表开第二个标签时旧键被 seedBrowse 覆盖，两个
+// 标签共享同一个游标：在 A 标签翻页会把 B 标签的窗口也推进（frame 经
+// st.paneID 回给 A，但游标已动），交叉污染且无报错。Pane.ID() 是原子
+// 计数器发的唯一 id，天然作键的第三段。
+func (a *App) browseKey(p *Pane) string {
+	return p.sourceNS + "|" + p.sourceTable + "|" + strconv.Itoa(p.ID())
+}
+
 // seedBrowse records where a table tab's window stands. The refresh path
 // (ReplaceBaseMsg) re-seeds so a mid-walk refresh starts over at page 1.
 func (a *App) seedBrowse(p *Pane) {
 	if p.sourceNS == "" || p.sourceTable == "" {
 		return
 	}
-	key := p.sourceNS + "|" + p.sourceTable
 	base := p.Base()
 	if base == nil {
 		return
@@ -1532,7 +1569,7 @@ func (a *App) seedBrowse(p *Pane) {
 		page:   1,
 		loaded: base.NumRows(),
 	}
-	a.browse[key] = state
+	a.browse[a.browseKey(p)] = state
 }
 
 // activeBrowse is the browse state of the active tab's table, or nil when the
@@ -1542,7 +1579,7 @@ func (a *App) activeBrowse() *browseState {
 	if p == nil || p.sourceNS == "" || p.sourceTable == "" {
 		return nil
 	}
-	return a.browse[p.sourceNS+"|"+p.sourceTable]
+	return a.browse[a.browseKey(p)]
 }
 
 // BrowsePageMsg carries one "next page" window back to the pane it was
@@ -1657,7 +1694,14 @@ func (a *App) closeTab(i int) tea.Cmd {
 		return tea.Quit
 	}
 	i = clamp(i, 0, len(a.tabs)-1)
+	closed := a.tabs[i]
 	a.tabs = append(a.tabs[:i], a.tabs[i+1:]...)
+	// 逆操作：连接是 app 级的，关一个 tab 不能关掉它；但该 tab 自己登记的
+	// 浏览窗口（seedBrowse 以 Pane.ID 为第三段键）必须撤回，否则窗口游标会
+	// 随 pane 一起成为孤儿，永久留在 browse 表里。
+	if closed != nil {
+		delete(a.browse, a.browseKey(closed))
+	}
 	if len(a.tabs) == 0 {
 		return tea.Quit
 	}

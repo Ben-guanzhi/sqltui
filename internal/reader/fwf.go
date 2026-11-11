@@ -78,22 +78,36 @@ func (fwfReader) Read(src *Source, opt Options) ([]NamedFrame, error) {
 	return []NamedFrame{{Name: src.Name(), Frame: frame}}, nil
 }
 
-// detectFwfSpans finds column boundaries by locating character positions that
-// are spaces in every sampled line; maximal non-space runs become columns.
+// detectFwfSpans finds column boundaries by locating byte positions that are
+// spaces in every sampled line; maximal non-space runs become columns.
 // Each span is widened up to the start of the next one so slightly wider
 // values in unsampled lines still land in the right column.
+//
+// 全程按 []byte 度量与切分：列边界只在 ASCII 空格处断开，多字节字符（CJK
+// 等）的字节都 >= 0x80，绝不会被当成空格，因此 rune 边界天然对齐字节边界。
+// 若改用 []rune 计算偏移，spans 存的就是 rune 偏移，而 fwfFields 用它对原始
+// 字节切片，切点会落在多字节字符中间，产出残缺 UTF-8（静默数据损坏）。
+// detectFwfSpans finds column boundaries by locating byte positions that are
+// spaces in every sampled line; maximal non-space runs become columns.
+// Each span is widened up to the start of the next one so slightly wider
+// values in unsampled lines still land in the right column.
+//
+// 全程按 []byte 度量与切分：列边界只在 ASCII 空格处断开，多字节字符（CJK
+// 等）的字节都 >= 0x80，绝不会被当成空格，因此 rune 边界天然对齐字节边界。
+// 若改用 []rune 计算偏移，spans 存的就是 rune 偏移，而 fwfFields 用它对原始
+// 字节切片，切点会落在多字节字符中间，产出残缺 UTF-8（静默数据损坏）。
 func detectFwfSpans(lines []string) [][2]int {
 	sample := lines
 	if len(sample) > fwfDetectSample {
 		sample = sample[:fwfDetectSample]
 	}
-	runeLines := make([][]rune, 0, len(sample))
+	byteLines := make([][]byte, 0, len(sample))
 	maxLen := 0
 	for _, l := range sample {
-		r := []rune(l)
-		runeLines = append(runeLines, r)
-		if len(r) > maxLen {
-			maxLen = len(r)
+		b := []byte(l)
+		byteLines = append(byteLines, b)
+		if len(b) > maxLen {
+			maxLen = len(b)
 		}
 	}
 	if maxLen == 0 {
@@ -102,8 +116,8 @@ func detectFwfSpans(lines []string) [][2]int {
 	allSpace := make([]bool, maxLen)
 	for p := 0; p < maxLen; p++ {
 		allSpace[p] = true
-		for _, r := range runeLines {
-			if p < len(r) && r[p] != ' ' {
+		for _, b := range byteLines {
+			if p < len(b) && b[p] != ' ' {
 				allSpace[p] = false
 				break
 			}

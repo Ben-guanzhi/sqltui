@@ -1,11 +1,13 @@
 package popup
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -14,6 +16,59 @@ import (
 	"github.com/LinPr/sqltui/internal/ui"
 	"github.com/LinPr/sqltui/internal/writer"
 )
+
+// editorRegistry tracks the editors editRunner launches so a UI exit can kill
+// one that is still running and remove its temp file. It is the inverse of the
+// launch: without it a quit (or a crash-recoverable return) orphans the editor
+// and leaks the scratch CSV.
+var (
+	editorMu     sync.Mutex
+	editorSeq    int
+	editorCancel = map[int]context.CancelFunc{}
+	editorTemps  = map[int]string{}
+)
+
+func trackEditor(cancel context.CancelFunc, tmp string) int {
+	editorMu.Lock()
+	editorSeq++
+	id := editorSeq
+	editorCancel[id] = cancel
+	editorTemps[id] = tmp
+	editorMu.Unlock()
+	return id
+}
+
+func untrackEditor(id int) {
+	editorMu.Lock()
+	delete(editorCancel, id)
+	delete(editorTemps, id)
+	editorMu.Unlock()
+}
+
+// killRunningEditors cancels every tracked editor context (exec.CommandContext
+// turns that into a process kill) and removes its temp file. Registered as a
+// UI exit hook; idempotent.
+func killRunningEditors() {
+	editorMu.Lock()
+	cancels := make([]context.CancelFunc, 0, len(editorCancel))
+	for _, c := range editorCancel {
+		cancels = append(cancels, c)
+	}
+	tmps := make([]string, 0, len(editorTemps))
+	for _, s := range editorTemps {
+		tmps = append(tmps, s)
+	}
+	editorCancel = map[int]context.CancelFunc{}
+	editorTemps = map[int]string{}
+	editorMu.Unlock()
+
+	for _, c := range cancels {
+		c()
+	}
+	for _, s := range tmps {
+		_ = os.Remove(s)
+	}
+}
 
 func init() {
 	ui.Factories["edit"] = func(ctx ui.AppContext, arg string) (ui.Overlay, error) {
@@ -41,19 +96,25 @@ func init() {
 			return nil, fmt.Errorf("write temp file: %w", werr)
 		}
 
-		return &editRunner{cmd: editEditorCmd(tmp.Name()), tmp: tmp.Name(), paneID: ctx.ActivePaneID()}, nil
+		// 编辑器进程用可取消的 CommandContext 启动：UI 退出钩子取消它即杀掉
+		// 仍在运行的编辑器（逆操作），同时登记临时文件以便退出时清理。
+		edCtx, edCancel := context.WithCancel(context.Background())
+		return &editRunner{cmd: editEditorCmd(edCtx, tmp.Name()), tmp: tmp.Name(), paneID: ctx.ActivePaneID(), editorID: trackEditor(edCancel, tmp.Name())}, nil
 	}
+	// 退出钩子：杀掉仍在运行的编辑器并清理其临时文件。
+	ui.RegisterExitHook(killRunningEditors)
 }
 
 // editEditorCmd builds the editor invocation for the temp file, honoring a
-// multi-word $EDITOR ("code -w") and falling back to vi.
-func editEditorCmd(path string) *exec.Cmd {
+// multi-word $EDITOR ("code -w") and falling back to vi. The context cancels
+// the launched process, which is how a UI exit kills a running editor.
+func editEditorCmd(ctx context.Context, path string) *exec.Cmd {
 	editor := strings.TrimSpace(os.Getenv("EDITOR"))
 	if editor == "" {
 		editor = "vi"
 	}
 	parts := strings.Fields(editor)
-	return exec.Command(parts[0], append(parts[1:], path)...)
+	return exec.CommandContext(ctx, parts[0], append(parts[1:], path)...)
 }
 
 // editRunner is an invisible auto-run overlay: factories cannot dispatch
@@ -61,10 +122,11 @@ func editEditorCmd(path string) *exec.Cmd {
 // (batched with its own close) the moment it is pushed. Update stays as a
 // fallback fire path for a message that races in before the close.
 type editRunner struct {
-	cmd     *exec.Cmd
-	tmp     string
-	paneID  int
-	started bool
+	cmd      *exec.Cmd
+	tmp      string
+	paneID   int
+	editorID int
+	started  bool
 }
 
 // Init fires the editor process as soon as the overlay is pushed.
@@ -74,9 +136,15 @@ func (e *editRunner) Init() tea.Cmd {
 	}
 	e.started = true
 	tmp, paneID := e.tmp, e.paneID
+	editorID := e.editorID
 	exe := ui.ExecProcessMsg{
-		Cmd:    e.cmd,
-		OnDone: func(err error) tea.Msg { return editReload(tmp, paneID, err) },
+		Cmd: e.cmd,
+		OnDone: func(err error) tea.Msg {
+			// 逆操作：编辑器结束后撤销登记（正常路径）。退出钩子杀掉的情况
+			// 这里只是幂等清理。
+			untrackEditor(editorID)
+			return editReload(tmp, paneID, err)
+		},
 	}
 	return tea.Batch(
 		ui.CloseOverlay,

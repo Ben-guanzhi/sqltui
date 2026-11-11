@@ -1,8 +1,11 @@
 package reader
 
 import (
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/LinPr/sqltui/internal/data"
 )
@@ -89,5 +92,42 @@ func TestDetectFwfSpans(t *testing.T) {
 				t.Errorf("detectFwfSpans(%q) = %v, want %v", tt.lines, got, tt.want)
 			}
 		})
+	}
+}
+
+// TestFWFCJKByteSpans 钉住定宽表自动检测在 CJK（多字节 UTF-8）下的行为：
+// detectFwfSpans 必须用字节偏移，fwfFields 才能按同一坐标系切片。若检测改用
+// []rune，spans 存的 rune 偏移会被当字节偏移切进多字节字符中间，产出残缺
+// UTF-8 而不报错（静默数据损坏）。
+func TestFWFCJKByteSpans(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "cjk.fwf")
+	content := "名称  数量\n苹果  10\n梨子  20\n"
+	if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	src, err := FromFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	frames, err := (fwfReader{}).Read(src, noInferOpts(FormatFWF))
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := frames[0].Frame
+	checkGrid(t, f,
+		[]string{"名称", "数量"},
+		[][]any{
+			{"苹果", "10"},
+			{"梨子", "20"},
+		})
+
+	// 每个字段都必须是合法 UTF-8：rune 偏移被当字节偏移切分时会留下残缺序列。
+	for r := 0; r < f.NumRows(); r++ {
+		for c := 0; c < f.NumCols(); c++ {
+			if s, ok := f.Cell(r, c).(string); ok && !utf8.ValidString(s) {
+				t.Errorf("cell(%d,%d) = %q 不是合法 UTF-8", r, c, s)
+			}
+		}
 	}
 }

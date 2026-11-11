@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -15,9 +16,11 @@ type httpClient struct {
 	base string
 	auth string
 	// hc serves the short JSON round-trips and carries a deadline, so a wedged
-	// server cannot hang the UI. sse has none: a search streams until the
-	// server sends [[DONE]], and a client deadline would cut long searches off
-	// mid-result-set.
+	// server cannot hang the UI. sse has no whole-request deadline: a search
+	// streams until the server sends [[DONE]], and a client deadline would cut
+	// long searches off mid-result-set. It still gets an explicit Transport so
+	// dial, TLS handshake and idle keep-alive sockets are individually bounded
+	// and can be released by Backend.Close.
 	hc  *http.Client
 	sse *http.Client
 }
@@ -57,12 +60,41 @@ func newHTTPClient(host, port, user, pass string) *httpClient {
 		base: scheme + "://" + host + ":" + port,
 		auth: "Basic " + basicAuth(user, pass),
 		hc:   &http.Client{Timeout: requestTimeout},
-		sse:  &http.Client{},
+		// sse 不设整请求 Timeout（长搜索必须流到 [[DONE]]），但给一个显式
+		// Transport：拨号、TLS 握手、空闲连接各自有界，避免"没有 Timeout"
+		// 被误读成任何一步都能无限期挂住，同时让 Backend.Close 能关掉它
+		// 自己的空闲 keep-alive 池。
+		sse: &http.Client{
+			Transport: &http.Transport{
+				Proxy: http.ProxyFromEnvironment,
+				DialContext: (&net.Dialer{
+					Timeout:   requestTimeout,
+					KeepAlive: 30 * time.Second,
+				}).DialContext,
+				MaxIdleConns:          100,
+				MaxIdleConnsPerHost:   10,
+				IdleConnTimeout:       requestTimeout,
+				TLSHandshakeTimeout:   requestTimeout,
+				ExpectContinueTimeout: 1 * time.Second,
+			},
+		},
 	}
 }
 
-func (c *httpClient) getJSON(path string, out any) error {
-	req, err := http.NewRequest(http.MethodGet, c.base+path, nil)
+// closeIdle releases the idle keep-alive sockets of both clients. It is the
+// inverse of the connections the ping and the searches opened; active
+// requests are left alone (their bodies are owned by the caller).
+func (c *httpClient) closeIdle() {
+	if c.hc != nil {
+		c.hc.CloseIdleConnections()
+	}
+	if c.sse != nil {
+		c.sse.CloseIdleConnections()
+	}
+}
+
+func (c *httpClient) getJSON(ctx context.Context, path string, out any) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+path, nil)
 	if err != nil {
 		return err
 	}

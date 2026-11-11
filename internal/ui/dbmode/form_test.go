@@ -1,10 +1,12 @@
 package dbmode
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -15,7 +17,7 @@ import (
 
 // fakeDialer swaps the package dialer for the test's lifetime so the async
 // connect flow can be driven without a live server.
-func fakeDialer(t *testing.T, fn func(kind string, v map[string]string) (db.Backend, db.KVBackend, error)) {
+func fakeDialer(t *testing.T, fn func(ctx context.Context, kind string, v map[string]string) (db.Backend, db.KVBackend, error)) {
 	t.Helper()
 	old := dialer
 	dialer = fn
@@ -119,7 +121,7 @@ func TestConnFormEnterConnectsFromAnyField(t *testing.T) {
 	useTempConfig(t)
 	for _, focus := range []int{0, 2, 4} {
 		dialed := false
-		fakeDialer(t, func(kind string, v map[string]string) (db.Backend, db.KVBackend, error) {
+		fakeDialer(t, func(ctx context.Context, kind string, v map[string]string) (db.Backend, db.KVBackend, error) {
 			dialed = true
 			return nil, nil, fmt.Errorf("refused")
 		})
@@ -245,7 +247,7 @@ func TestConnFormConnectSuccess(t *testing.T) {
 	file := useTempConfig(t)
 
 	be := &fakeBackend{}
-	fakeDialer(t, func(kind string, v map[string]string) (db.Backend, db.KVBackend, error) {
+	fakeDialer(t, func(ctx context.Context, kind string, v map[string]string) (db.Backend, db.KVBackend, error) {
 		if kind != KindMysql {
 			t.Fatalf("dialed kind %q, want %q", kind, KindMysql)
 		}
@@ -329,7 +331,7 @@ func TestConnFormConnectSuccess(t *testing.T) {
 // open and shows the error.
 func TestConnFormConnectFailure(t *testing.T) {
 	useTempConfig(t)
-	fakeDialer(t, func(kind string, v map[string]string) (db.Backend, db.KVBackend, error) {
+	fakeDialer(t, func(ctx context.Context, kind string, v map[string]string) (db.Backend, db.KVBackend, error) {
 		return nil, nil, fmt.Errorf("connection refused")
 	})
 
@@ -389,5 +391,51 @@ func TestConnFormPasswordKeepsWhitespace(t *testing.T) {
 	}
 	if v[fkUser] != "alice" {
 		t.Errorf("user = %q, want trimmed", v[fkUser])
+	}
+}
+
+// TestDialCancelOnExit pins the ST-04 inverse: a dial still blocked in the
+// kernel is cancelled by the UI-exit hook instead of running on to its own
+// timeout and orphaning a connection.
+func TestDialCancelOnExit(t *testing.T) {
+	useTempConfig(t)
+	seen := make(chan context.Context, 1)
+	fakeDialer(t, func(ctx context.Context, kind string, v map[string]string) (db.Backend, db.KVBackend, error) {
+		select {
+		case seen <- ctx:
+		default:
+		}
+		<-ctx.Done()
+		return nil, nil, ctx.Err()
+	})
+
+	f := newConnForm(nil, KindMysql)
+	_, cmd := f.Update(keyPress("enter"))
+	if cmd == nil {
+		t.Fatal("enter did not start the connect")
+	}
+
+	done := make(chan struct{})
+	go func() {
+		runCmd(cmd)
+		close(done)
+	}()
+
+	select {
+	case dialCtx := <-seen:
+		if dialCtx == nil {
+			t.Fatal("dial received a nil context")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("dial did not reach the blocking point")
+	}
+
+	// The registered exit hook cancels every in-flight dial.
+	cancelAllDials()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("exit hook did not cancel the in-flight dial")
 	}
 }

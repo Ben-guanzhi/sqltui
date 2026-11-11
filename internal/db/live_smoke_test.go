@@ -17,6 +17,7 @@
 package db_test
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"strings"
@@ -231,7 +232,7 @@ func TestLiveSmokePostgres(t *testing.T) {
 	if env == nil {
 		t.Skip("SQLTUI_SMOKE_PG not set")
 	}
-	be, err := postgresbe.Connect(postgresbe.Config{
+	be, err := postgresbe.Connect(context.Background(), postgresbe.Config{
 		UserName: env[2], Password: env[3], Host: env[0], Port: env[1], DbName: env[4], SslMode: "disable",
 	})
 	if err != nil {
@@ -247,7 +248,7 @@ func TestLiveSmokeMySQL(t *testing.T) {
 	if env == nil {
 		t.Skip("SQLTUI_SMOKE_MYSQL not set")
 	}
-	be, err := mysqlbe.Connect(mysqlbe.Config{
+	be, err := mysqlbe.Connect(context.Background(), mysqlbe.Config{
 		UserName: env[2], Password: env[3], Host: env[0], Port: env[1], DbName: env[4],
 	})
 	if err != nil {
@@ -263,7 +264,7 @@ func TestLiveSmokeSQLServer(t *testing.T) {
 	if env == nil {
 		t.Skip("SQLTUI_SMOKE_MSSQL not set")
 	}
-	be, err := sqlserverbe.Connect(sqlserverbe.Config{
+	be, err := sqlserverbe.Connect(context.Background(), sqlserverbe.Config{
 		UserName: env[2], Password: env[3], Host: env[0], Port: env[1], DbName: env[4],
 	})
 	if err != nil {
@@ -279,7 +280,7 @@ func TestLiveSmokeOracle(t *testing.T) {
 	if env == nil {
 		t.Skip("SQLTUI_SMOKE_ORACLE not set")
 	}
-	be, err := oraclebe.Connect(oraclebe.Config{
+	be, err := oraclebe.Connect(context.Background(), oraclebe.Config{
 		UserName: env[2], Password: env[3], Host: env[0], Port: env[1], DbName: env[4],
 	})
 	if err != nil {
@@ -302,7 +303,7 @@ func TestLiveSmokeRedis(t *testing.T) {
 	if env == nil {
 		t.Skip("SQLTUI_SMOKE_REDIS not set")
 	}
-	be, err := redisbe.Connect(redisbe.Config{Host: env[0], Port: env[1], RdbNum: "0"})
+	be, err := redisbe.Connect(context.Background(), redisbe.Config{Host: env[0], Port: env[1], RdbNum: "0"})
 	if err != nil {
 		t.Fatalf("connect: %v", err)
 	}

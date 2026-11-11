@@ -45,7 +45,9 @@ func (b *Backend) ListFolders() ([]FolderInfo, error) {
 			Name     string `json:"name"`
 		} `json:"list"`
 	}
-	if err := b.client.getJSON(path, &resp); err != nil {
+	ctx, done := b.requestCtx()
+	defer done()
+	if err := b.client.getJSON(ctx, path, &resp); err != nil {
 		return nil, fmt.Errorf("list folders: %w", err)
 	}
 	out := make([]FolderInfo, len(resp.List))
@@ -100,7 +102,9 @@ func (b *Backend) ListDashboardsInFolder(folderID, folderName string) ([]Dashboa
 			V8          *versionData `json:"v8"`
 		} `json:"dashboards"`
 	}
-	if err := b.client.getJSON(path, &resp); err != nil {
+	ctx, done := b.requestCtx()
+	defer done()
+	if err := b.client.getJSON(ctx, path, &resp); err != nil {
 		return nil, fmt.Errorf("list dashboards: %w", err)
 	}
 	out := make([]DashboardInfo, 0, len(resp.Dashboards))

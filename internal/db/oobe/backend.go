@@ -57,7 +57,9 @@ var (
 )
 
 // Connect creates a Backend and verifies connectivity by listing namespaces.
-func Connect(cfg Config) (*Backend, error) {
+// The context bounds the initial ping, so a UI exit can cancel a connect that
+// is still waiting on the server.
+func Connect(ctx context.Context, cfg Config) (*Backend, error) {
 	b := &Backend{
 		cfg:       cfg,
 		client:    newHTTPClient(cfg.Host, cfg.Port, cfg.UserName, cfg.Password),
@@ -65,7 +67,7 @@ func Connect(cfg Config) (*Backend, error) {
 		page:      0,
 		pageSize:  200,
 	}
-	if _, err := b.Namespaces(); err != nil {
+	if _, err := b.namespacesCtx(ctx); err != nil {
 		return nil, fmt.Errorf("openobserve: connect: %w", err)
 	}
 	return b, nil
@@ -173,13 +175,21 @@ func (b *Backend) CurrentNamespace() string { return b.cfg.Org }
 // Namespaces returns the single configured org as the only namespace.
 func (b *Backend) Namespaces() ([]string, error) {
 	// Ping by fetching streams; if it fails, connection is broken.
+	ctx, done := b.requestCtx()
+	defer done()
+	return b.namespacesCtx(ctx)
+}
+
+// namespacesCtx is the Namespaces ping with an externally supplied context, so
+// Connect can bound the initial dial.
+func (b *Backend) namespacesCtx(ctx context.Context) ([]string, error) {
 	path := fmt.Sprintf("/api/%s/streams?type=logs&offset=0&limit=1&sort=name&asc=true", b.cfg.Org)
 	var resp struct {
 		List []struct {
 			Name string `json:"name"`
 		} `json:"list"`
 	}
-	if err := b.client.getJSON(path, &resp); err != nil {
+	if err := b.client.getJSON(ctx, path, &resp); err != nil {
 		return nil, err
 	}
 	return []string{b.cfg.Org}, nil
@@ -187,13 +197,15 @@ func (b *Backend) Namespaces() ([]string, error) {
 
 // Tables lists log streams in the given namespace (org).
 func (b *Backend) Tables(namespace string) ([]string, error) {
+	ctx, done := b.requestCtx()
+	defer done()
 	path := fmt.Sprintf("/api/%s/streams?type=logs&offset=0&limit=200&sort=name&asc=true", namespace)
 	var resp struct {
 		List []struct {
 			Name string `json:"name"`
 		} `json:"list"`
 	}
-	if err := b.client.getJSON(path, &resp); err != nil {
+	if err := b.client.getJSON(ctx, path, &resp); err != nil {
 		return nil, err
 	}
 	names := make([]string, len(resp.List))
@@ -205,6 +217,8 @@ func (b *Backend) Tables(namespace string) ([]string, error) {
 
 // ColumnsMeta returns column metadata for a log stream via its schema endpoint.
 func (b *Backend) ColumnsMeta(namespace, table string) ([]db.ColumnMeta, error) {
+	ctx, done := b.requestCtx()
+	defer done()
 	path := fmt.Sprintf("/api/%s/streams/%s/schema?type=logs", namespace, table)
 	var resp struct {
 		Schema []struct {
@@ -212,7 +226,7 @@ func (b *Backend) ColumnsMeta(namespace, table string) ([]db.ColumnMeta, error) 
 			DataType string `json:"type"`
 		} `json:"schema"`
 	}
-	if err := b.client.getJSON(path, &resp); err != nil {
+	if err := b.client.getJSON(ctx, path, &resp); err != nil {
 		return nil, err
 	}
 	metas := make([]db.ColumnMeta, len(resp.Schema))
@@ -419,8 +433,16 @@ func (b *Backend) ColumnIndexTypes(namespace, table string) (map[string]string, 
 	return map[string]string{"_timestamp": "INDEX"}, nil
 }
 
-// Close is a no-op; the HTTP client has no persistent connections to release.
-func (b *Backend) Close() error { return nil }
+// Close releases the HTTP client's idle keep-alive connections. The client
+// itself has no Close (it is configuration, not an owned handle), but the
+// sockets the pings and searches opened are real resources: closing the idle
+// pool is the inverse of acquiring them. Safe to call more than once.
+func (b *Backend) Close() error {
+	if b.client != nil {
+		b.client.closeIdle()
+	}
+	return nil
+}
 
 // requestCtx hands out a ctx wired to the cancel registry for one HTTP
 // request; the returned done clears the registration and cancels.

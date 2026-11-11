@@ -83,6 +83,22 @@ func TestSqlLiteral(t *testing.T) {
 	if got := sqlLiteral(pg, `c:\`); got != `'c:\'` {
 		t.Errorf("pg sqlLiteral = %q, want %q", got, `'c:\'`)
 	}
+	// A NUL byte must be escaped on MySQL (a raw 0x00 ends the literal) and
+	// refused on engines that have no escape for it (SEC-03).
+	if got := sqlLiteral(mysql, "a\x00b"); got != `'a\0b'` {
+		t.Errorf("mysql sqlLiteral with NUL = %q, want %q", got, `'a\0b'`)
+	}
+	if got := sqlLiteral(mysql, "a\x00b"); strings.ContainsRune(got, 0) {
+		t.Errorf("raw NUL reached the statement: %q", got)
+	}
+	// PostgreSQL has no NUL escape: the rendered literal must not carry the
+	// byte (it would truncate or be rejected mid-statement), and it must be
+	// visibly refused rather than silently storing a shortened value.
+	if got := sqlLiteral(pg, "a\x00b"); strings.ContainsRune(got, 0) {
+		t.Errorf("raw NUL reached a pg statement: %q", got)
+	} else if !strings.Contains(got, "refused") {
+		t.Errorf("pg NUL literal = %q, want an explicit refusal", got)
+	}
 }
 
 func TestParseTyped(t *testing.T) {

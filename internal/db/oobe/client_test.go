@@ -29,5 +29,8 @@ func TestNewHTTPClientBase(t *testing.T) {
 		if got.sse.Timeout != 0 {
 			t.Errorf("newHTTPClient(%q).sse.Timeout = %v, want 0 (an SSE stream runs until [[DONE]])", c.host, got.sse.Timeout)
 		}
+		if got.sse.Transport == nil {
+			t.Errorf("newHTTPClient(%q) must give sse an explicit Transport so dial/TLS/idle are bounded", c.host)
+		}
 	}
 }

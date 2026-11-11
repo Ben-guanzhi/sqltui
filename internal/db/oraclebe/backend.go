@@ -74,12 +74,13 @@ var (
 )
 
 // Connect opens an Oracle connection through the kernel, validates the
-// config, pings the server, and returns a ready-to-use Backend.
-func Connect(cfg Config) (*Backend, error) {
+// config, pings the server, and returns a ready-to-use Backend. The context
+// bounds the dial, so the UI can cancel an in-flight connect on exit.
+func Connect(ctx context.Context, cfg Config) (*Backend, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("oracle connect: invalid config: %w", err)
 	}
-	drv, err := dbcore.Open(context.Background(), cfg.ConnSpec(), dbcore.PoolConfig{})
+	drv, err := dbcore.Open(ctx, cfg.ConnSpec(), dbcore.PoolConfig{})
 	if err != nil {
 		return nil, fmt.Errorf("oracle connect: %w", err)
 	}

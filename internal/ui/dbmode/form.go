@@ -1,8 +1,10 @@
 package dbmode
 
 import (
+	"context"
 	"fmt"
 	"strings"
+	"sync"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -61,6 +63,10 @@ type connForm struct {
 	focus      int
 	errText    string
 	connecting bool
+	// dialCancel cancels the in-flight dial's context. The dial command also
+	// cancels it on return; this handle is what lets the UI-exit hook (and a
+	// late dismiss) cancel a dial that is still blocked in the kernel.
+	dialCancel context.CancelFunc
 }
 
 func newConnForm(ctx ui.AppContext, kind string) *connForm {
@@ -102,11 +108,12 @@ var baseFields = []fieldSpec{
 // engineSpec declares, for one engine kind, the connection form fields in
 // display order, the prefill source, the dialer and the config writer.
 // engineSpecs is the single source of truth behind loadFields, dial and
-// saveConfig.
+// saveConfig. The dialer takes the dial context so a UI-exit hook can cancel
+// a connect still blocked in the kernel.
 type engineSpec struct {
 	fields  []fieldSpec
 	prefill func() []string
-	dial    func(v map[string]string) (db.Backend, db.KVBackend, error)
+	dial    func(ctx context.Context, v map[string]string) (db.Backend, db.KVBackend, error)
 	save    func(v map[string]string) error
 }
 
@@ -126,8 +133,8 @@ var engineSpecs = map[string]engineSpec{
 			}
 			return []string{c.UserName, c.Password, c.Host, c.Port, c.DbName}
 		},
-		dial: func(v map[string]string) (db.Backend, db.KVBackend, error) {
-			be, err := mysqlbe.Connect(mysqlbe.Config{
+		dial: func(ctx context.Context, v map[string]string) (db.Backend, db.KVBackend, error) {
+			be, err := mysqlbe.Connect(ctx, mysqlbe.Config{
 				UserName: v[fkUser], Password: v[fkPassword],
 				Host: v[fkHost], Port: v[fkPort], DbName: v[fkDatabase],
 			})
@@ -155,8 +162,8 @@ var engineSpecs = map[string]engineSpec{
 			}
 			return []string{c.UserName, c.Password, c.Host, c.Port, c.DbName, c.SslMode}
 		},
-		dial: func(v map[string]string) (db.Backend, db.KVBackend, error) {
-			be, err := postgresbe.Connect(postgresbe.Config{
+		dial: func(ctx context.Context, v map[string]string) (db.Backend, db.KVBackend, error) {
+			be, err := postgresbe.Connect(ctx, postgresbe.Config{
 				UserName: v[fkUser], Password: v[fkPassword],
 				Host: v[fkHost], Port: v[fkPort], DbName: v[fkDatabase],
 				SslMode: v[fkSslMode],
@@ -183,8 +190,8 @@ var engineSpecs = map[string]engineSpec{
 			}
 			return []string{c.UserName, c.Password, c.Host, c.Port, c.RdbNum}
 		},
-		dial: func(v map[string]string) (db.Backend, db.KVBackend, error) {
-			kv, err := redisbe.Connect(redisbe.Config{
+		dial: func(ctx context.Context, v map[string]string) (db.Backend, db.KVBackend, error) {
+			kv, err := redisbe.Connect(ctx, redisbe.Config{
 				UserName: v[fkUser], Password: v[fkPassword],
 				Host: v[fkHost], Port: v[fkPort], RdbNum: v[fkDbNum],
 			})
@@ -216,8 +223,8 @@ var engineSpecs = map[string]engineSpec{
 			}
 			return []string{c.UserName, c.Password, host, port, org}
 		},
-		dial: func(v map[string]string) (db.Backend, db.KVBackend, error) {
-			be, err := oobe.Connect(oobe.Config{
+		dial: func(ctx context.Context, v map[string]string) (db.Backend, db.KVBackend, error) {
+			be, err := oobe.Connect(ctx, oobe.Config{
 				UserName: v[fkUser], Password: v[fkPassword],
 				Host: v[fkHost], Port: v[fkPort], Org: v[fkOrg],
 			})
@@ -242,8 +249,8 @@ var engineSpecs = map[string]engineSpec{
 			}
 			return []string{c.UserName, c.Password, c.Host, c.Port, c.DbName}
 		},
-		dial: func(v map[string]string) (db.Backend, db.KVBackend, error) {
-			be, err := sqlserverbe.Connect(sqlserverbe.Config{
+		dial: func(ctx context.Context, v map[string]string) (db.Backend, db.KVBackend, error) {
+			be, err := sqlserverbe.Connect(ctx, sqlserverbe.Config{
 				UserName: v[fkUser], Password: v[fkPassword],
 				Host: v[fkHost], Port: v[fkPort], DbName: v[fkDatabase],
 			})
@@ -268,8 +275,8 @@ var engineSpecs = map[string]engineSpec{
 			}
 			return []string{c.UserName, c.Password, c.Host, c.Port, c.DbName}
 		},
-		dial: func(v map[string]string) (db.Backend, db.KVBackend, error) {
-			be, err := oraclebe.Connect(oraclebe.Config{
+		dial: func(ctx context.Context, v map[string]string) (db.Backend, db.KVBackend, error) {
+			be, err := oraclebe.Connect(ctx, oraclebe.Config{
 				UserName: v[fkUser], Password: v[fkPassword],
 				Host: v[fkHost], Port: v[fkPort], DbName: v[fkDatabase],
 			})
@@ -307,12 +314,62 @@ func (o *connForm) values() map[string]string {
 // live server.
 var dialer = dial
 
+// 拨号取消登记表：内核拨号跑在 tea.Cmd 里，UI 退出时必须能取消它，否则连接
+// 建立会留在后台 goroutine 里直到内核超时。func 值不能作 map 键，所以按 id
+// 登记。cancelAllDials 作为 UI 退出钩子注册（见 registerDialExitHook）。
+var (
+	dialCancelMu sync.Mutex
+	dialSeq      int
+	dialCancels  = map[int]context.CancelFunc{}
+)
+
+func trackDialCancel(cancel context.CancelFunc) int {
+	dialCancelMu.Lock()
+	dialSeq++
+	id := dialSeq
+	dialCancels[id] = cancel
+	dialCancelMu.Unlock()
+	return id
+}
+
+func untrackDialCancel(id int) {
+	dialCancelMu.Lock()
+	delete(dialCancels, id)
+	dialCancelMu.Unlock()
+}
+
+// cancelAllDials cancels every in-flight dial. It is the inverse of
+// startConnect's registration and runs on every UI exit path.
+func cancelAllDials() {
+	dialCancelMu.Lock()
+	cancels := make([]context.CancelFunc, 0, len(dialCancels))
+	for _, c := range dialCancels {
+		cancels = append(cancels, c)
+	}
+	dialCancelMu.Unlock()
+	for _, c := range cancels {
+		c()
+	}
+}
+
+var dialExitOnce sync.Once
+
+// registerDialExitHook wires the dial cancellation into the UI exit path.
+func registerDialExitHook() {
+	dialExitOnce.Do(func() { ui.RegisterExitHook(cancelAllDials) })
+}
+
+// init wires the dial cancellation into every UI exit path. Registering at
+// package load (rather than from RegisterFactories) keeps the inverse tied to
+// the dial even if a test drives startConnect without the factory setup.
+func init() { registerDialExitHook() }
+
 // dial opens the connection for one kind. Exactly one of the returned
 // backends is non-nil on success; whoever attaches it (the app, via
 // SetBackendMsg) owns it and closes it on replacement or exit.
-func dial(kind string, v map[string]string) (db.Backend, db.KVBackend, error) {
+func dial(ctx context.Context, kind string, v map[string]string) (db.Backend, db.KVBackend, error) {
 	if spec, ok := engineSpecs[kind]; ok {
-		return spec.dial(v)
+		return spec.dial(ctx, v)
 	}
 	return nil, nil, fmt.Errorf("unknown database kind: %s", kind)
 }
@@ -339,8 +396,17 @@ func (o *connForm) startConnect() tea.Cmd {
 	o.connecting = true
 	o.errText = ""
 	kind, vals := o.kind, o.values()
+	// 可取消的拨号上下文：内核拨号在 tea.Cmd 里执行，UI 退出时必须能取消它，
+	// 否则连接建立会留在后台 goroutine 里直到内核超时。
+	ctx, cancel := context.WithCancel(context.Background())
+	id := trackDialCancel(cancel)
+	o.dialCancel = cancel
 	return func() tea.Msg {
-		be, kv, err := dialer(kind, vals)
+		defer func() {
+			cancel()
+			untrackDialCancel(id)
+		}()
+		be, kv, err := dialer(ctx, kind, vals)
 		return connDoneMsg{kind: kind, vals: vals, be: be, kv: kv, err: err}
 	}
 }
@@ -370,6 +436,11 @@ func (o *connForm) Update(msg tea.Msg) (ui.Overlay, tea.Cmd) {
 	switch m := msg.(type) {
 	case connDoneMsg:
 		o.connecting = false
+		// 拨号已结束：撤销登记，并清掉 form 上的取消句柄（幂等）。
+		if o.dialCancel != nil {
+			o.dialCancel()
+			o.dialCancel = nil
+		}
 		if m.err != nil {
 			o.errText = m.err.Error()
 			return o, nil

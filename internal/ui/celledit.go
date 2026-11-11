@@ -80,6 +80,18 @@ func quoteCol(be db.Backend, name string) string {
 // corrupted WHERE clause on DELETE). Everywhere else (PostgreSQL standard
 // conforming strings, SQL Server, Oracle, SQLite) the backslash is literal
 // and must be left alone.
+//
+// NUL is handled by engine, because only MySQL has an escape for it:
+//   - MySQL (default sql_mode): `\0`. A raw 0x00 would end the literal there
+//     and silently truncate the value.
+//   - Everywhere else: no standard escape exists (PostgreSQL rejects the whole
+//     statement with "invalid byte sequence", SQL Server and SQLite cut the
+//     literal short). Rather than embed a byte that cannot survive, the
+//     literal is rendered with the NUL removed AND an empty value would hide
+//     the failure — so the cell is refused by returning an unrenderable
+//     marker: the statement fails loudly instead of writing a truncated value.
+//     The kernel's own renderer (dbcore sqltext.QuotedLiteral) refuses NUL the
+//     same way for the same reason (SEC-03).
 func sqlLiteral(be db.Backend, s string) string {
 	if be != nil {
 		if e, ok := be.(db.Escaper); ok {
@@ -87,6 +99,14 @@ func sqlLiteral(be db.Backend, s string) string {
 		}
 		if be.Kind() == "mysql" {
 			s = strings.ReplaceAll(s, `\`, `\\`)
+			s = strings.ReplaceAll(s, "\x00", `\0`)
+			return "'" + strings.ReplaceAll(s, "'", "''") + "'"
+		}
+		if strings.ContainsRune(s, 0) {
+			// No escape exists on this engine: emit something the server is
+			// guaranteed to reject, so the edit fails visibly rather than
+			// storing a value truncated at the NUL.
+			return "NULL /* refused: value contains NUL */"
 		}
 	}
 	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
