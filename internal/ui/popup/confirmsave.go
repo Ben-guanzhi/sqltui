@@ -27,12 +27,7 @@ func init() {
 
 // addConfirmSaveCommand lists "confirmsave" in the palette table once.
 func addConfirmSaveCommand() {
-	for _, c := range Commands {
-		if c.Name == "confirmsave" {
-			return
-		}
-	}
-	Commands = append(Commands, Command{Name: "confirmsave", Description: "confirm save edit"})
+	registerPaletteOnly(Command{Name: "confirmsave", Description: "confirm save edit"})
 }
 
 // confirmSaveOverlay asks the user whether to commit the pending edit. A

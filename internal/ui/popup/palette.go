@@ -61,6 +61,15 @@ func init() {
 // separate Commands append, so dispatch and the palette entry cannot drift.
 func RegisterCommand(c Command, f func(ctx ui.AppContext, arg string) (ui.Overlay, error)) {
 	ui.Factories[c.Name] = f
+	registerPaletteOnly(c)
+}
+
+// registerPaletteOnly lists a palette-visible command whose dispatch is
+// registered separately (the confirm overlays register their Factories entry
+// right beside this call). It exists so the Commands table has exactly one
+// append site: the corpus cache keys on len(Commands) and relies on every
+// append being duplicate-free and nothing ever shrinking the table.
+func registerPaletteOnly(c Command) {
 	for _, x := range Commands {
 		if x.Name == c.Name {
 			return
@@ -76,11 +85,11 @@ type paletteEntry struct {
 }
 
 // corpusCache memoizes buildPaletteCorpus between keystrokes: the corpus is a
-// pure function of the Commands table, whose only mutation point is
-// RegisterCommand (idempotent by name) — so len(Commands) is a complete
-// version key. First keystroke pays the build; later ones reuse the slice.
-// A shrinking table is impossible (no unregister), so a length key cannot
-// serve a stale corpus.
+// pure function of the Commands table, whose only append site is
+// registerPaletteOnly (RegisterCommand's palette half, idempotent by name) — so
+// len(Commands) is a complete version key. First keystroke pays the build;
+// later ones reuse the slice. A shrinking table is impossible (nothing
+// unregisters or edits an entry), so a length key cannot serve a stale corpus.
 var corpusCache = struct {
 	n     int
 	ready bool

@@ -65,7 +65,7 @@ var (
 // returning. The context bounds the dial, so the UI can cancel an in-flight
 // connect on exit instead of leaving the kernel dial running in the background.
 func Connect(ctx context.Context, cfg Config) (*Backend, error) {
-	drv, err := dbcore.Open(ctx, cfg.ConnSpec(), dbcore.PoolConfig{})
+	drv, err := dbcore.Open(ctx, cfg.ConnSpec(), dbcore.DefaultPoolConfig())
 	if err != nil {
 		return nil, err
 	}

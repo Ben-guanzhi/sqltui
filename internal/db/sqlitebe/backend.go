@@ -47,7 +47,7 @@ func Connect(cfg Config) (*Backend, error) {
 	drv, err := dbcore.Open(context.Background(), dbcore.ConnSpec{
 		Kind: dbcore.KindSQLite,
 		File: file,
-	}, dbcore.PoolConfig{})
+	}, dbcore.DefaultPoolConfig())
 	if err != nil {
 		return nil, err
 	}

@@ -61,7 +61,7 @@ var (
 // returning. The context bounds the dial, so the UI can cancel an in-flight
 // connect on exit instead of leaving the kernel dial running in the background.
 func Connect(ctx context.Context, cfg Config) (*Backend, error) {
-	drv, err := dbcore.Open(ctx, cfg.ConnSpec(), dbcore.PoolConfig{})
+	drv, err := dbcore.Open(ctx, cfg.ConnSpec(), dbcore.DefaultPoolConfig())
 	if err != nil {
 		return nil, err
 	}
@@ -74,7 +74,7 @@ func Connect(ctx context.Context, cfg Config) (*Backend, error) {
 		Kind:            "mysql",
 		Title:           fmt.Sprintf("mysql://%s/%s", strings.TrimSpace(cfg.Host), strings.TrimSpace(cfg.DbName)),
 		Target:          Target,
-		CurrentNS:       func(context.Context) string { return strings.TrimSpace(cfg.DbName) },
+		CurrentNS:       func(context.Context) (string, error) { return strings.TrimSpace(cfg.DbName), nil },
 		HasLastInsertID: true,
 	})}, nil
 }

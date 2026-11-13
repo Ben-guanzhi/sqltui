@@ -224,6 +224,12 @@ func convertCells(cells []any, t DType) []any {
 		if s == "" {
 			continue
 		}
+		// The same shape gate the inference used: ParseFloat also accepts
+		// Go-style underscore literals (1_000) and hex floats, so a sample that
+		// missed such a cell must not silently rewrite it to 1000 (N4).
+		if !isProbablyParsable(s, t) {
+			continue
+		}
 		if parsed, ok := ParseAs(s, t); ok {
 			out[i] = parsed
 		}

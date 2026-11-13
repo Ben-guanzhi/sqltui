@@ -81,7 +81,7 @@ func Connect(ctx context.Context, cfg Config) (*Backend, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, fmt.Errorf("sqlserver connect: invalid config: %w", err)
 	}
-	drv, err := dbcore.Open(ctx, cfg.ConnSpec(), dbcore.PoolConfig{})
+	drv, err := dbcore.Open(ctx, cfg.ConnSpec(), dbcore.DefaultPoolConfig())
 	if err != nil {
 		return nil, fmt.Errorf("sqlserver connect: %w", err)
 	}
@@ -95,7 +95,7 @@ func Connect(ctx context.Context, cfg Config) (*Backend, error) {
 			Kind:      "sqlserver",
 			Title:     fmt.Sprintf("sqlserver://%s/%s", strings.TrimSpace(cfg.Host), strings.TrimSpace(cfg.DbName)),
 			Target:    Target,
-			CurrentNS: func(context.Context) string { return strings.TrimSpace(cfg.DbName) },
+			CurrentNS: func(context.Context) (string, error) { return strings.TrimSpace(cfg.DbName), nil },
 		}),
 		drv: sqlDrv,
 	}, nil

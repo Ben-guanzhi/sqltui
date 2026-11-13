@@ -41,7 +41,10 @@ type Options struct {
 	Target func(namespace, table string) string
 	// CurrentNS reports the namespace new objects resolve to on this
 	// connection; nil means the backend does not implement db.Namespaced.
-	CurrentNS func(ctx context.Context) string
+	// A failure must come back as an error: the memo below only stores
+	// successful answers, so a transient failure is retried instead of being
+	// pinned as the empty namespace forever.
+	CurrentNS func(ctx context.Context) (string, error)
 	// HasLastInsertID reports whether ExecResult.LastInsertID is meaningful
 	// (mysql, sqlite); false keeps the field hidden (postgres, oracle).
 	HasLastInsertID bool
@@ -197,11 +200,16 @@ func (b *Backend) CurrentNamespace() string {
 	if done {
 		return v
 	}
-	// Cold: resolve synchronously and memo (the status quo). WarmNamespace at
-	// connection time makes this path near-unreachable.
+	// Cold: resolve synchronously and memo. Only a successful answer is
+	// memoized — an error must leave the memo cold so the next lookup retries,
+	// otherwise one flaky round trip pins the namespace to "" and the delete
+	// confirmation and completion paths address the wrong database.
 	ctx, cancel := context.WithTimeout(context.Background(), QueryTimeout)
 	defer cancel()
-	v = b.opt.CurrentNS(ctx)
+	v, err := b.opt.CurrentNS(ctx)
+	if err != nil {
+		return ""
+	}
 	b.nsMu.Lock()
 	b.nsValue, b.nsDone = v, true
 	b.nsMu.Unlock()
@@ -210,7 +218,8 @@ func (b *Backend) CurrentNamespace() string {
 
 // WarmNamespace resolves the connected namespace once. The app fires it when
 // the connection lands (a tea.Cmd goroutine), so the update loop's namespace
-// lookups answer from the memo instead of freezing on a cold query.
+// lookups answer from the memo instead of freezing on a cold query. A failed
+// resolution leaves the memo cold for the same reason CurrentNamespace does.
 func (b *Backend) WarmNamespace() {
 	if b.opt.CurrentNS == nil {
 		return
@@ -223,7 +232,10 @@ func (b *Backend) WarmNamespace() {
 	b.nsMu.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), QueryTimeout)
 	defer cancel()
-	v := b.opt.CurrentNS(ctx)
+	v, err := b.opt.CurrentNS(ctx)
+	if err != nil {
+		return
+	}
 	b.nsMu.Lock()
 	b.nsValue, b.nsDone = v, true
 	b.nsMu.Unlock()
@@ -579,16 +591,20 @@ func ParsePort(s string) int {
 }
 
 // CurrentNSQuery builds a CurrentNS option that resolves the namespace with a
-// single-row single-column query (e.g. "SELECT current_schema()"); an error
-// or an empty answer yields "".
-func CurrentNSQuery(drv dbcore.SQLDriver, query string) func(context.Context) string {
-	return func(ctx context.Context) string {
+// single-row single-column query (e.g. "SELECT current_schema()"). A failed
+// query is an error (the memo stays cold and retries); an empty answer with no
+// error is a legitimate "no default namespace" and is memoized.
+func CurrentNSQuery(drv dbcore.SQLDriver, query string) func(context.Context) (string, error) {
+	return func(ctx context.Context) (string, error) {
 		res, err := drv.Execute(ctx, query)
-		if err != nil || len(res.Rows) == 0 || len(res.Rows[0]) == 0 {
-			return ""
+		if err != nil {
+			return "", err
+		}
+		if len(res.Rows) == 0 || len(res.Rows[0]) == 0 {
+			return "", nil
 		}
 		s, _ := dbcore.TryGetString(res.Rows[0][0])
-		return s
+		return s, nil
 	}
 }
 

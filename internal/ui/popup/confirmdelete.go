@@ -26,12 +26,7 @@ func init() {
 
 // addConfirmDeleteCommand lists "confirmdelete" in the palette table once.
 func addConfirmDeleteCommand() {
-	for _, c := range Commands {
-		if c.Name == "confirmdelete" {
-			return
-		}
-	}
-	Commands = append(Commands, Command{Name: "confirmdelete", Description: "confirm delete rows"})
+	registerPaletteOnly(Command{Name: "confirmdelete", Description: "confirm delete rows"})
 }
 
 // confirmDeleteOverlay asks the user whether to delete the pending rows. A

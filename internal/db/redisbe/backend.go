@@ -100,7 +100,7 @@ func Connect(ctx context.Context, cfg Config) (*Backend, error) {
 		return nil, fmt.Errorf("invalid redis db number %q: %w", cfg.RdbNum, err)
 	}
 	spec := cfg.ConnSpec()
-	drv, err := dbcore.Open(ctx, spec, dbcore.PoolConfig{})
+	drv, err := dbcore.Open(ctx, spec, dbcore.DefaultPoolConfig())
 	if err != nil {
 		return nil, err
 	}

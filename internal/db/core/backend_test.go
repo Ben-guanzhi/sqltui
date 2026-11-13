@@ -18,8 +18,8 @@ import (
 func TestCurrentNamespaceMemoizes(t *testing.T) {
 	b := New(nil, Options{
 		Kind: "postgresql",
-		CurrentNS: func(context.Context) string {
-			return "public"
+		CurrentNS: func(context.Context) (string, error) {
+			return "public", nil
 		},
 	})
 	if _, ok := db.Backend(b).(db.NamespaceWarmer); !ok {
@@ -40,9 +40,9 @@ func TestCurrentNamespaceMemoizes(t *testing.T) {
 	var resolved atomic.Int64
 	b2 := New(nil, Options{
 		Kind: "postgresql",
-		CurrentNS: func(context.Context) string {
+		CurrentNS: func(context.Context) (string, error) {
 			resolved.Add(1)
-			return "app"
+			return "app", nil
 		},
 	})
 	b2.WarmNamespace()
@@ -219,5 +219,39 @@ func TestBrowsePage(t *testing.T) {
 	}
 	if frame3.NumRows() != 100 {
 		t.Fatalf("offset page 2 = %d rows, want 100", frame3.NumRows())
+	}
+}
+
+// 一次瞬时失败不能被记忆成"空命名空间": 失败的解析不置 nsDone, 下一次查询重试;
+// 而"成功但为空"(合法的无默认库)必须记忆, 否则每次查都多一次往返。后端把
+// CurrentNS 的失败从 "" 里区分出来之前, 一次抖动就把 CurrentNamespace 永久钉成
+// 空串, 删除确认与补全此后都走错库。
+func TestCurrentNamespaceRetriesAfterFailure(t *testing.T) {
+	var calls atomic.Int64
+	var fail atomic.Bool
+	fail.Store(true)
+	b := New(nil, Options{
+		Kind: "mysql",
+		CurrentNS: func(context.Context) (string, error) {
+			calls.Add(1)
+			if fail.Load() {
+				return "", fmt.Errorf("transient")
+			}
+			return "shop", nil
+		},
+	})
+	if got := b.CurrentNamespace(); got != "" {
+		t.Fatalf("failed lookup = %q, want empty", got)
+	}
+	b.WarmNamespace() // 仍失败: 不记忆
+	if calls.Load() != 2 {
+		t.Fatalf("calls = %d, want 2 (a failure must not be memoized)", calls.Load())
+	}
+	fail.Store(false)
+	if got := b.CurrentNamespace(); got != "shop" {
+		t.Fatalf("retry = %q, want shop", got)
+	}
+	if got := b.CurrentNamespace(); got != "shop" || calls.Load() != 3 {
+		t.Fatalf("success must memoize: got %q calls=%d", got, calls.Load())
 	}
 }
