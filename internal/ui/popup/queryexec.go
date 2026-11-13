@@ -9,8 +9,12 @@
 package popup
 
 import (
+	"context"
+	"errors"
 	"fmt"
+	"strconv"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -29,32 +33,66 @@ type qxExecInfo struct {
 // qxRun executes sqlText through whichever facility the app has: a live
 // database backend takes precedence (database mode), otherwise the embedded
 // engine (file mode). Exactly one of frame/info is non-nil on success.
-// qxRun executes sqlText through whichever facility the app has: a live
-// database backend takes precedence (database mode), otherwise the embedded
-// engine (file mode). Exactly one of frame/info is non-nil on success.
 // truncated reports that a row-set hit the ad-hoc row cap (backend only).
+//
+// S-01：这里也是 TUI 唯一的语句执行收口——记录 query 任务（成功/取消/失败 +
+// 耗时），命令面板驱动的所有路径因此自动被覆盖。取消的判定沿用既有的
+// ctx.Err() 口径：语句没有自己的取消类型，context 取消即用户取消。
 func qxRun(ctx ui.AppContext, sqlText string) (*data.Frame, *qxExecInfo, bool, error) {
+	started := time.Now()
+	res, err := qxRunOnce(ctx, sqlText)
+	outcome := "ok"
+	switch {
+	case err != nil && errors.Is(err, context.Canceled):
+		outcome = "cancelled"
+	case err != nil:
+		outcome = "error"
+	}
+	recordMetric("query", outcome, started, map[string]string{
+		"statement_type": stmtKeyword(sqlText),
+		"rows":           strconv.Itoa(frameRows(res.frame)),
+		"truncated":      strconv.FormatBool(err == nil && res.truncated),
+	})
+	return res.frame, res.info, res.truncated, err
+}
+
+// qxRunOutcome 是 qxRunOnce 的返回：原三元组加上截断标记，供记录使用。
+type qxRunOutcome struct {
+	frame     *data.Frame
+	info      *qxExecInfo
+	truncated bool
+}
+
+func frameRows(f *data.Frame) int {
+	if f == nil || len(f.Columns) == 0 {
+		return 0
+	}
+	// Frame 是列存：行数 = 任一列的长度（列等长）。
+	return f.Columns[0].Len()
+}
+
+func qxRunOnce(ctx ui.AppContext, sqlText string) (qxRunOutcome, error) {
 	if be := ctx.Backend(); be != nil {
 		res, err := be.Run(sqlText)
 		if err != nil {
-			return nil, nil, false, err
+			return qxRunOutcome{}, err
 		}
 		if res.Frame != nil {
-			return res.Frame, nil, res.Truncated, nil
+			return qxRunOutcome{frame: res.Frame, truncated: res.Truncated}, nil
 		}
 		if res.Exec != nil {
-			return nil, &qxExecInfo{rowsAffected: res.Exec.RowsAffected}, false, nil
+			return qxRunOutcome{info: &qxExecInfo{rowsAffected: res.Exec.RowsAffected}}, nil
 		}
-		return nil, &qxExecInfo{}, false, nil
+		return qxRunOutcome{info: &qxExecInfo{}}, nil
 	}
 	if eng := ctx.Engine(); eng != nil {
 		f, err := eng.Query(sqlText)
 		if err != nil {
-			return nil, nil, false, err
+			return qxRunOutcome{}, err
 		}
-		return f, nil, false, nil
+		return qxRunOutcome{frame: f}, nil
 	}
-	return nil, nil, false, fmt.Errorf("no database connection and no embedded SQL engine available")
+	return qxRunOutcome{}, fmt.Errorf("no database connection and no embedded SQL engine available")
 }
 
 // qxRunCmd wraps qxRun in a tea.Cmd, mapping the outcome to app messages:

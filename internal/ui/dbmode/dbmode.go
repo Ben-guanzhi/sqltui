@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 
+		"github.com/dbcore/dbcore/usability"
 	"github.com/LinPr/sqltui/internal/config"
 	"github.com/LinPr/sqltui/internal/ui"
 	"github.com/LinPr/sqltui/internal/ui/popup" // register the base overlay factories
@@ -40,6 +41,12 @@ func Run(kind string) error {
 	}
 
 	RegisterFactories(kind)
+
+	// Usability metrics (S-01): a no-op unless POLYDB_USABILITY=1. The file
+	// lives in the user config dir next to the other sqltui state; never uploaded.
+	um := usability.Open("sqltui", config.UsabilityPath())
+	popup.UseMetrics(um)
+	defer um.Close()
 
 	app := ui.New(ui.Options{
 		ThemeName:      uiConf.Theme,
