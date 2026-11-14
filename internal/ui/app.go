@@ -628,6 +628,15 @@ func (a *App) renderBottom(w int) string {
 	switch {
 	case a.backend != nil:
 		info.Conn = a.backend.Title()
+		// S-05 persistent-mode-signal：有待提交编辑/删除时状态栏常驻提示
+		// （文本承载，非纯颜色）。TUI 无连接级只读/事务模式，这个是唯一的
+		// "会话处于特殊状态"信号。
+		if a.pendingEdit != nil {
+			info.Mode = info.Mode + " · edit pending"
+		}
+		if a.pendingDelete != nil {
+			info.Mode = info.Mode + " · delete pending"
+		}
 		// Populate OpenObserve-specific status info via type assertion.
 		if oobe, ok := a.backend.(db.QueryParamsSetter); ok {
 			info.TimeRange = formatTimeRange(oobe.GetTimeRange())
