@@ -16,7 +16,7 @@ func TestClassifyCursorType(t *testing.T) {
 		{"BIGINT", cursorInt},
 		{"bigint unsigned", cursorInt},
 		{"INT8", cursorInt},
-		{"INTERVAL", cursorText},          // contains "INT" but is not an int type
+		{"INTERVAL", cursorText}, // contains "INT" but is not an int type
 		{"INTERVAL DAY TO SECOND", cursorText},
 		{"REAL", cursorFloat},
 		{"FLOAT", cursorFloat},

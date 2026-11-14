@@ -501,7 +501,6 @@ func WriteOobeSummaryColumns(cols []string) error {
 	})
 }
 
-
 // UsabilityPath 返回可用性指标的落盘路径（S-01）：用户配置目录下的
 // usability.ndjson，与其它 sqltui 状态同处；无法取目录时退回当前目录。
 func UsabilityPath() string {
