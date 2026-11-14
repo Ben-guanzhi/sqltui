@@ -13,10 +13,6 @@ import (
 	"github.com/LinPr/sqltui/internal/db"
 	"github.com/LinPr/sqltui/internal/db/mysqlbe"
 	"github.com/LinPr/sqltui/internal/db/oobe"
-	"github.com/LinPr/sqltui/internal/db/oraclebe"
-	"github.com/LinPr/sqltui/internal/db/postgresbe"
-	"github.com/LinPr/sqltui/internal/db/redisbe"
-	"github.com/LinPr/sqltui/internal/db/sqlserverbe"
 	"github.com/LinPr/sqltui/internal/theme"
 	"github.com/LinPr/sqltui/internal/ui"
 )
@@ -163,15 +159,9 @@ var engineSpecs = map[string]engineSpec{
 			return []string{c.UserName, c.Password, c.Host, c.Port, c.DbName, c.SslMode}
 		},
 		dial: func(ctx context.Context, v map[string]string) (db.Backend, db.KVBackend, error) {
-			be, err := postgresbe.Connect(ctx, postgresbe.Config{
-				UserName: v[fkUser], Password: v[fkPassword],
-				Host: v[fkHost], Port: v[fkPort], DbName: v[fkDatabase],
-				SslMode: v[fkSslMode],
-			})
-			if err != nil {
-				return nil, nil, err
-			}
-			return be, nil, nil
+			// 波 100 插件化：非内置引擎的 dial 走 dialHook（extra_engines
+			// 构建里有实现，默认构建报怎么获得引擎）。
+			return dialHook("postgres", ctx, v)
 		},
 		save: func(v map[string]string) error {
 			return config.WritePostgresConfig(&config.PostgresConfig{
@@ -191,14 +181,7 @@ var engineSpecs = map[string]engineSpec{
 			return []string{c.UserName, c.Password, c.Host, c.Port, c.RdbNum}
 		},
 		dial: func(ctx context.Context, v map[string]string) (db.Backend, db.KVBackend, error) {
-			kv, err := redisbe.Connect(ctx, redisbe.Config{
-				UserName: v[fkUser], Password: v[fkPassword],
-				Host: v[fkHost], Port: v[fkPort], RdbNum: v[fkDbNum],
-			})
-			if err != nil {
-				return nil, nil, err
-			}
-			return nil, kv, nil
+			return dialHook("redis", ctx, v)
 		},
 		save: func(v map[string]string) error {
 			return config.WriteRedisConfig(&config.RedisConfig{
@@ -250,14 +233,8 @@ var engineSpecs = map[string]engineSpec{
 			return []string{c.UserName, c.Password, c.Host, c.Port, c.DbName}
 		},
 		dial: func(ctx context.Context, v map[string]string) (db.Backend, db.KVBackend, error) {
-			be, err := sqlserverbe.Connect(ctx, sqlserverbe.Config{
-				UserName: v[fkUser], Password: v[fkPassword],
-				Host: v[fkHost], Port: v[fkPort], DbName: v[fkDatabase],
-			})
-			if err != nil {
-				return nil, nil, err
-			}
-			return be, nil, nil
+			// 波 100 插件化：走 dialHook（extra_engines 构建里有实现）。
+			return dialHook("sqlserver", ctx, v)
 		},
 		save: func(v map[string]string) error {
 			return config.WriteSqlServerConfig(&config.SqlServerConfig{
@@ -276,14 +253,7 @@ var engineSpecs = map[string]engineSpec{
 			return []string{c.UserName, c.Password, c.Host, c.Port, c.DbName}
 		},
 		dial: func(ctx context.Context, v map[string]string) (db.Backend, db.KVBackend, error) {
-			be, err := oraclebe.Connect(ctx, oraclebe.Config{
-				UserName: v[fkUser], Password: v[fkPassword],
-				Host: v[fkHost], Port: v[fkPort], DbName: v[fkDatabase],
-			})
-			if err != nil {
-				return nil, nil, err
-			}
-			return be, nil, nil
+			return dialHook("oracle", ctx, v)
 		},
 		save: func(v map[string]string) error {
 			return config.WriteOracleConfig(&config.OracleConfig{
