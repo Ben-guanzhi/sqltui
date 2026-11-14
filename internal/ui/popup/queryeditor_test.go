@@ -112,7 +112,8 @@ func TestQueryEditorExecute(t *testing.T) {
 	if !apply.NewTab || apply.Crumb != "query" {
 		t.Errorf("NewTab=%v Crumb=%q", apply.NewTab, apply.Crumb)
 	}
-	if apply.TabTitle != "SELECT * FROM _" {
+	if apply.TabTitle != "SELECT * FROM _" && !strings.HasPrefix(apply.TabTitle, "SELECT * FROM _ · ") {
+		// 波 97：页签标题带耗时后缀（· Nms），前缀必须是原语句。
 		t.Errorf("TabTitle = %q", apply.TabTitle)
 	}
 	if apply.Frame == nil || apply.Frame.NumRows() != 3 {

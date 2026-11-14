@@ -295,7 +295,7 @@ func TestQxRunRouting(t *testing.T) {
 	// Backend frame result takes precedence over the engine.
 	be := &qxFakeBackend{res: db.Result{Frame: qxTestFrame()}}
 	ctx := &qxCtx{backend: be, base: "users"}
-	f, info, _, err := qxRun(ctx, "SELECT 1")
+	f, info, _, err, _ := qxRun(ctx, "SELECT 1")
 	if err != nil || f == nil || info != nil {
 		t.Fatalf("backend frame: f=%v info=%v err=%v", f, info, err)
 	}
@@ -305,20 +305,20 @@ func TestQxRunRouting(t *testing.T) {
 
 	// Backend exec result.
 	be.res = db.Result{Exec: &db.ExecResult{RowsAffected: 7}}
-	f, info, _, err = qxRun(ctx, "DELETE FROM t")
+	f, info, _, err, _ = qxRun(ctx, "DELETE FROM t")
 	if err != nil || f != nil || info == nil || info.rowsAffected != 7 {
 		t.Fatalf("backend exec: f=%v info=%+v err=%v", f, info, err)
 	}
 
 	// Backend error.
 	be.res, be.err = db.Result{}, errors.New("boom")
-	if _, _, _, err := qxRun(ctx, "SELECT 1"); err == nil {
+	if _, _, _, err, _ := qxRun(ctx, "SELECT 1"); err == nil {
 		t.Error("backend error not propagated")
 	}
 
 	// File mode routes to the engine.
 	file := qxFileCtx(t)
-	f, info, _, err = qxRun(file, `SELECT * FROM "_" WHERE age > 1`)
+	f, info, _, err, _ = qxRun(file, `SELECT * FROM "_" WHERE age > 1`)
 	if err != nil || info != nil {
 		t.Fatalf("engine run: info=%v err=%v", info, err)
 	}
@@ -327,7 +327,7 @@ func TestQxRunRouting(t *testing.T) {
 	}
 
 	// Neither facility available.
-	if _, _, _, err := qxRun(&qxCtx{}, "SELECT 1"); err == nil {
+	if _, _, _, err, _ := qxRun(&qxCtx{}, "SELECT 1"); err == nil {
 		t.Error("expected error with no engine and no backend")
 	}
 }
@@ -351,8 +351,9 @@ func TestQxRunCmdMessages(t *testing.T) {
 	be := &qxFakeBackend{res: db.Result{Exec: &db.ExecResult{RowsAffected: 3}}}
 	msgs = qxDrain(qxRunCmd(&qxCtx{backend: be}, "UPDATE t SET x=1", onFrame))
 	toast, ok := qxFindMsg[ui.ToastMsg](msgs)
-	if !ok || toast.Text != "3 rows affected" {
-		t.Errorf("exec result: got %v, want rows-affected toast", msgs)
+	// 波 97：toast 带耗时后缀「· Nms」。
+	if !ok || !strings.HasPrefix(toast.Text, "3 rows affected · ") {
+		t.Errorf("exec result: got %v, want rows-affected toast with elapsed suffix", msgs)
 	}
 }
 

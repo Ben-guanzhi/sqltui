@@ -38,7 +38,7 @@ type qxExecInfo struct {
 // S-01：这里也是 TUI 唯一的语句执行收口——记录 query 任务（成功/取消/失败 +
 // 耗时），命令面板驱动的所有路径因此自动被覆盖。取消的判定沿用既有的
 // ctx.Err() 口径：语句没有自己的取消类型，context 取消即用户取消。
-func qxRun(ctx ui.AppContext, sqlText string) (*data.Frame, *qxExecInfo, bool, error) {
+func qxRun(ctx ui.AppContext, sqlText string) (*data.Frame, *qxExecInfo, bool, error, time.Duration) {
 	started := time.Now()
 	res, err := qxRunOnce(ctx, sqlText)
 	outcome := "ok"
@@ -48,12 +48,13 @@ func qxRun(ctx ui.AppContext, sqlText string) (*data.Frame, *qxExecInfo, bool, e
 	case err != nil:
 		outcome = "error"
 	}
+	elapsed := time.Since(started)
 	recordMetric("query", outcome, started, map[string]string{
 		"statement_type": stmtKeyword(sqlText),
 		"rows":           strconv.Itoa(frameRows(res.frame)),
 		"truncated":      strconv.FormatBool(err == nil && res.truncated),
 	})
-	return res.frame, res.info, res.truncated, err
+	return res.frame, res.info, res.truncated, err, elapsed
 }
 
 // qxRunOutcome 是 qxRunOnce 的返回：原三元组加上截断标记，供记录使用。
@@ -100,9 +101,12 @@ func qxRunOnce(ctx ui.AppContext, sqlText string) (qxRunOutcome, error) {
 // become the error popup. A truncated row-set still shows the (capped)
 // frame but marks it so the app can toast that rows were dropped — the
 // result never reads as complete.
+//
+// 波 97（DataGrip 惯例）：耗时跟结果走——row-set 的页签标题带 `· Nms` 后缀，
+// DML 的 toast 带耗时。S-01 记录的是同一时钟，两处一致。
 func qxRunCmd(ctx ui.AppContext, sqlText string, onFrame func(*data.Frame) tea.Msg) tea.Cmd {
 	return func() tea.Msg {
-		frame, info, truncated, err := qxRun(ctx, sqlText)
+		frame, info, truncated, err, elapsed := qxRun(ctx, sqlText)
 		switch {
 		case err != nil:
 			return ui.ErrorMsg{Err: err}
@@ -117,11 +121,17 @@ func qxRunCmd(ctx ui.AppContext, sqlText string, onFrame func(*data.Frame) tea.M
 					msg = af
 				}
 			}
+			// 页签标题追加耗时后缀（仅 ApplyFrameMsg 且调用方未自带标题时——
+			// 统一入口都有 TabTitle，这里直接拼接）。
+			if af, ok := msg.(ui.ApplyFrameMsg); ok {
+				af.TabTitle = fmt.Sprintf("%s · %s", af.TabTitle, elapsed.Round(time.Millisecond))
+				msg = af
+			}
 			return msg
 		case info != nil:
-			return ui.ToastMsg{Text: fmt.Sprintf("%d rows affected", info.rowsAffected)}
+			return ui.ToastMsg{Text: fmt.Sprintf("%d rows affected · %s", info.rowsAffected, elapsed.Round(time.Millisecond))}
 		default:
-			return ui.ToastMsg{Text: "ok"}
+			return ui.ToastMsg{Text: fmt.Sprintf("ok · %s", elapsed.Round(time.Millisecond))}
 		}
 	}
 }
