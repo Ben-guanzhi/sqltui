@@ -538,6 +538,8 @@ func (a *App) View() tea.View {
 
 	v := tea.NewView(topBar + body)
 	v.AltScreen = true
+	// 波 94：终端标题回答「我在哪个客户端」（Navicat/Terminal 惯例——窗口标题即身份）。
+	v.WindowTitle = "sqltui — SQL / KV console"
 	return v
 }
 
