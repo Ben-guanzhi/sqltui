@@ -1098,6 +1098,24 @@ func (a *App) dispatch(action, key string) tea.Cmd {
 		return nil
 	case ActDelete:
 		return a.startDelete()
+	case ActUndo:
+		// S-02 single-undo-gesture: undo the pending edit or pending delete
+		// while it waits for confirmation (the TUI's only pre-commit state).
+		if a.pendingEdit != nil {
+			if p := a.pane(); p != nil {
+				p.SheetEditing = false
+			}
+			a.pendingEdit = nil
+			return a.setToast("undo: edit canceled")
+		}
+		if a.pendingDelete != nil {
+			a.pendingDelete = nil
+			if p := a.pane(); p != nil {
+				p.Table.ClearSelect()
+			}
+			return a.setToast("undo: delete canceled")
+		}
+		return a.setToast("nothing to undo")
 	case ActNextPage:
 		if a.backend != nil {
 			if oobe, ok := a.backend.(db.Paged); ok {

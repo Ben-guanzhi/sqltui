@@ -54,6 +54,7 @@ const (
 	ActPrevPage     = "prev-page"
 	ActColFocus     = "col-focus"
 	ActOobeCols     = "oobe-cols"
+	ActUndo         = "undo"
 )
 
 // GlobalBindings apply in every non-overlay mode.
@@ -97,6 +98,12 @@ var TableBindings = []Binding{
 	{Keys: []string{">"}, Action: ActNextPage, Help: "next page"},
 	{Keys: []string{"<"}, Action: ActPrevPage, Help: "prev page"},
 	{Keys: []string{"z"}, Action: ActColFocus, Help: "zoom current column (h/l to scroll)"},
+	// S-02 single-undo-gesture: Ctrl+Z cancels the pending edit / pending
+	// delete while it waits for confirmation — the same "undo the last
+	// change before it commits" gesture the GUI clients bind to Ctrl+Z.
+	// Nothing to undo → the key falls through to ActColFocus's owner (z),
+	// so the binding never swallows a useful key.
+	{Keys: []string{"ctrl+z"}, Action: ActUndo, Help: "undo pending edit/delete"},
 	{Keys: []string{"v"}, Action: ActOobeCols, Help: "select display columns (OpenObserve)"},
 }
 
