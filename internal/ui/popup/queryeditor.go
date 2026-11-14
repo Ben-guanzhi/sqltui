@@ -1,6 +1,7 @@
 package popup
 
 import (
+	"fmt"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -9,12 +10,23 @@ import (
 	"github.com/LinPr/sqltui/internal/query"
 	"github.com/LinPr/sqltui/internal/theme"
 	"github.com/LinPr/sqltui/internal/ui"
+
+	"github.com/dbcore/dbcore/sqltext"
 )
 
 func init() {
 	ui.Factories["query"] = func(ctx ui.AppContext, arg string) (ui.Overlay, error) {
 		return qxNewEditor(ctx, arg), nil
 	}
+	// 波 97（DataGrip/Navicat 惯例的终端对应物）：":explain" 打开的编辑器在
+	// Enter 时把语句包进引擎的 EXPLAIN 配方再执行——计划永不执行语句。
+	RegisterCommand(Command{
+		Name:        "explain",
+		Aliases:     []string{"plan"},
+		Description: "show the statement's execution plan (EXPLAIN)",
+	}, func(ctx ui.AppContext, arg string) (ui.Overlay, error) {
+		return qxNewExplainEditor(ctx, arg), nil
+	})
 }
 
 // qxEditor is the full SQL editor overlay ("query" command): a single input
@@ -35,6 +47,9 @@ type qxEditor struct {
 	// for, so a dot completion on an unknown/empty table cannot re-fetch on
 	// every keystroke.
 	warmed map[string]bool
+	// explain marks the ":explain" variant: Enter wraps the statement in the
+	// engine's EXPLAIN recipe (kernel sqltext.ExplainQuery) before running.
+	explain bool
 }
 
 // qxSchemaMsg delivers an async completion-schema snapshot to the editor.
@@ -47,6 +62,35 @@ type qxSchemaMsg struct {
 
 func qxNewEditor(ctx ui.AppContext, arg string) *qxEditor {
 	return &qxEditor{ctx: ctx, in: ui.NewLineInput(arg), warmed: make(map[string]bool)}
+}
+
+// qxNewExplainEditor is the ":explain" variant of the query editor: the same
+// input and completion, but Enter executes the statement's plan instead of
+// the statement. The dialect recipe comes from the kernel (MySQL/PG prefix
+// EXPLAIN, SQLite EXPLAIN QUERY PLAN, ...); the embedded engine is SQLite, so
+// file mode explains through EXPLAIN QUERY PLAN.
+func qxNewExplainEditor(ctx ui.AppContext, arg string) *qxEditor {
+	e := qxNewEditor(ctx, arg)
+	e.explain = true
+	return e
+}
+
+// qxExplainSQL wraps sqlText in the EXPLAIN recipe for the context's engine.
+// A live backend answers with its own Kind; file mode is always SQLite. An
+// unsupported engine is an error, not a silent plain run.
+func qxExplainSQL(ctx ui.AppContext, sqlText string) (string, error) {
+	kind := "sqlite"
+	if be := ctx.Backend(); be != nil {
+		kind = be.Kind()
+	}
+	plan, err := sqltext.ExplainQuery(kind, sqlText)
+	if err != nil {
+		return "", err
+	}
+	if plan.Prepare != "" {
+		return "", fmt.Errorf("this engine's plan needs session state (SET SHOWPLAN_XML) — run it from a GUI client")
+	}
+	return plan.Query, nil
 }
 
 // Init warms the live table catalog and snapshots the schema, both off the
@@ -142,6 +186,13 @@ func (e *qxEditor) Update(msg tea.Msg) (ui.Overlay, tea.Cmd) {
 		sqlText := strings.TrimSpace(e.in.String())
 		if sqlText == "" {
 			return e, ui.CloseOverlay
+		}
+		if e.explain {
+			wrapped, err := qxExplainSQL(e.ctx, sqlText)
+			if err != nil {
+				return e, func() tea.Msg { return ui.ErrorMsg{Err: err} }
+			}
+			sqlText = wrapped
 		}
 		run := qxRunCmd(e.ctx, sqlText, func(f *data.Frame) tea.Msg {
 			return ui.ApplyFrameMsg{
