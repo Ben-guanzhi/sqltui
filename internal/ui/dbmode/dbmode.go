@@ -25,14 +25,31 @@ const (
 	KindOracle      = "oracle"
 )
 
-// Run starts the UI in database mode for one engine kind: no tabs, no
-// embedded engine, a connection form as the initial overlay. It returns when
-// the UI exits; ui.Run closes whatever live connection the app attached.
+// Run starts the UI in database mode for one engine kind. 波 100 进程插件化：
+// the built-in kinds are MySQL / Redis / OpenObserve (and SQLite in file mode);
+// anything else found beside the executable as sqltui-plugin-<kind> is also
+// accepted — the form's dial spawns that plugin per connection. Unknown kinds
+// get a clear list of what IS available instead of a bare rejection.
 func Run(kind string) error {
 	switch kind {
 	case KindMysql, KindPostgres, KindRedis, KindOpenObserve, KindSqlServer, KindOracle:
 	default:
-		return fmt.Errorf("unknown database kind: %s", kind)
+		available := PluginKinds()
+		found := false
+		for _, k := range available {
+			if strings.EqualFold(k, kind) {
+				found = true
+				kind = k // use the discovered spelling
+				break
+			}
+		}
+		if !found {
+			hint := "put sqltui-plugin-<kind> beside the executable, or rebuild with -tags extra_engines"
+			if len(available) > 0 {
+				hint = "available plugins: " + strings.Join(available, ", ") + "; " + hint
+			}
+			return fmt.Errorf("unknown database kind %q — %s", kind, hint)
+		}
 	}
 
 	uiConf, err := config.ReadUIConfig()

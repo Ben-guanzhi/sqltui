@@ -8,3 +8,10 @@ docs/
 .claude/
 
 gate10.txt
+
+# Build output and locally built driver plugins (波 100 进程插件化): the
+# repository ships plugin SOURCES, never the executables a user drops beside
+# the app.
+/build/
+/sqltui-plugin-*.exe
+/dist/

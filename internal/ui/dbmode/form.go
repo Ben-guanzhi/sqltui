@@ -75,7 +75,12 @@ func newConnForm(ctx ui.AppContext, kind string) *connForm {
 func loadFields(kind string) []connField {
 	spec, ok := engineSpecs[kind]
 	if !ok {
-		return nil
+		// 波 100 进程插件化：发现的插件 kind 没有内建 spec——用通用数据库
+		// 表单（user/password/host/port/database）+ 空预填，dial 走插件。
+		spec = engineSpec{
+			fields:  fieldsFor(fieldSpec{key: fkDatabase, label: "database"}),
+			prefill: func() []string { return []string{"", "", "", "", ""} },
+		}
 	}
 	vals := spec.prefill()
 	fields := make([]connField, len(spec.fields))
@@ -341,15 +346,17 @@ func dial(ctx context.Context, kind string, v map[string]string) (db.Backend, db
 	if spec, ok := engineSpecs[kind]; ok {
 		return spec.dial(ctx, v)
 	}
-	return nil, nil, fmt.Errorf("unknown database kind: %s", kind)
+	return dialHook(kind, ctx, v)
 }
 
 // saveConfig persists the form values with the existing per-engine writers.
+// A discovered plugin kind has no per-engine config writer — its values are
+// simply not persisted (the form still works; 波 100 进程插件化的可接受取舍).
 func saveConfig(kind string, v map[string]string) error {
 	if spec, ok := engineSpecs[kind]; ok {
 		return spec.save(v)
 	}
-	return fmt.Errorf("unknown database kind: %s", kind)
+	return nil
 }
 
 // Fullscreen marks the form as a full page (ui.FullscreenOverlay): a

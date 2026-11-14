@@ -81,6 +81,26 @@ SQLite databases are just files — open them directly in file mode
 | Redis      | `sqltui redis`    | [redis/go-redis](https://github.com/redis/go-redis)         |
 | OpenObserve| `sqltui openobserve` (`oo`) | built-in HTTP/SSE client (streams, dashboards)       |
 
+**Driver plugins (runtime, no rebuild).** The default binary ships MySQL and
+SQLite (file mode) built in. Every other engine can arrive as a plugin
+executable beside it, named `sqltui-plugin-<kind>` (`.exe` on Windows). Each
+connection spawns its own plugin process; the process owns the database
+handle and dies with the connection, so a driver crash is contained to one
+tab. Build a plugin from the sources in this repo:
+
+```sh
+go build -o sqltui-plugin-postgres ./cmd/sqltui-plugin-postgres
+# place the binary beside sqltui, then:
+sqltui postgres          # the form dials the plugin instead of a linked driver
+```
+
+`sqltui <kind>` also accepts any discovered plugin kind that has no built-in
+subcommand. A kind with neither a built-in nor a plugin reports exactly what
+to put where. The `-tags extra_engines` build still links every driver
+in-process (compatibility path); the wire protocol (`internal/db/pluginwire`)
+is typed so a result's `int64` / `float64` / `time.Time` / `NULL` cells survive
+the round trip unchanged.
+
 A connection form opens first (prefilled from the config file): `enter`
 connects, `tab`/arrows move between fields, `ctrl+s` saves, `esc` quits.
 After connecting, the schema browser opens with the connected database
