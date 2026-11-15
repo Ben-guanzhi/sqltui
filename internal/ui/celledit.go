@@ -11,7 +11,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/dbcore/dbcore/sqltext"
+	"github.com/Ben-guanzhi/dbcore/sqltext"
 
 	"github.com/LinPr/sqltui/internal/data"
 	"github.com/LinPr/sqltui/internal/db"

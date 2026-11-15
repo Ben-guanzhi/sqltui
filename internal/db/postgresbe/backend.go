@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dbcore/dbcore"
-	_ "github.com/dbcore/dbcore/postgres" // registers the postgres factory
+	"github.com/Ben-guanzhi/dbcore"
+	_ "github.com/Ben-guanzhi/dbcore/postgres" // registers the postgres factory
 
 	"github.com/LinPr/sqltui/internal/db"
 	"github.com/LinPr/sqltui/internal/db/core"

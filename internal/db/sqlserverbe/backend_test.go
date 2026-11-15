@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dbcore/dbcore"
-	dbcoremssql "github.com/dbcore/dbcore/mssql"
+	"github.com/Ben-guanzhi/dbcore"
+	dbcoremssql "github.com/Ben-guanzhi/dbcore/mssql"
 )
 
 func TestConnSpec(t *testing.T) {

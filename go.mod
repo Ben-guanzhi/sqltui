@@ -5,9 +5,9 @@ go 1.25.0
 require (
 	charm.land/bubbletea/v2 v2.0.8
 	charm.land/lipgloss/v2 v2.0.5
+	github.com/Ben-guanzhi/dbcore v0.2.0
 	github.com/alicebob/miniredis/v2 v2.40.0
 	github.com/charmbracelet/x/ansi v0.11.7
-	github.com/dbcore/dbcore v0.0.0-00010101000000-000000000000
 	github.com/go-sql-driver/mysql v1.10.1
 	github.com/parquet-go/parquet-go v0.30.1
 	github.com/sahilm/fuzzy v0.1.3
@@ -74,5 +74,3 @@ require (
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
 )
-
-replace github.com/dbcore/dbcore => ../dbcore

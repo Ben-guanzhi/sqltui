@@ -13,8 +13,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dbcore/dbcore"
-	_ "github.com/dbcore/dbcore/redis" // registers the redis factory
+	"github.com/Ben-guanzhi/dbcore"
+	_ "github.com/Ben-guanzhi/dbcore/redis" // registers the redis factory
 
 	"github.com/LinPr/sqltui/internal/db"
 )

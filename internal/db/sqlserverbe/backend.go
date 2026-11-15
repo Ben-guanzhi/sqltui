@@ -13,8 +13,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/dbcore/dbcore"
-	_ "github.com/dbcore/dbcore/mssql" // registers the mssql factory
+	"github.com/Ben-guanzhi/dbcore"
+	_ "github.com/Ben-guanzhi/dbcore/mssql" // registers the mssql factory
 
 	"github.com/LinPr/sqltui/internal/db"
 	"github.com/LinPr/sqltui/internal/db/core"

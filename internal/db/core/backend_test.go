@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/LinPr/sqltui/internal/db"
-	dbcoresqlite "github.com/dbcore/dbcore/sqlite"
+	dbcoresqlite "github.com/Ben-guanzhi/dbcore/sqlite"
 )
 
 // CurrentNamespace memoizes: the first resolution is the only query. The app

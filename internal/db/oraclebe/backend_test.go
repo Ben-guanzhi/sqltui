@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dbcore/dbcore"
-	dbcoreoracle "github.com/dbcore/dbcore/oracle"
+	"github.com/Ben-guanzhi/dbcore"
+	dbcoreoracle "github.com/Ben-guanzhi/dbcore/oracle"
 )
 
 func TestConnSpec(t *testing.T) {

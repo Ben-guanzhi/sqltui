@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dbcore/dbcore"
-	_ "github.com/dbcore/dbcore/oracle" // registers the oracle factory
+	"github.com/Ben-guanzhi/dbcore"
+	_ "github.com/Ben-guanzhi/dbcore/oracle" // registers the oracle factory
 
 	"github.com/LinPr/sqltui/internal/db"
 	"github.com/LinPr/sqltui/internal/db/core"

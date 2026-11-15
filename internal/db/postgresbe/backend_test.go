@@ -3,7 +3,7 @@ package postgresbe
 import (
 	"testing"
 
-	"github.com/dbcore/dbcore"
+	"github.com/Ben-guanzhi/dbcore"
 )
 
 func TestConnSpec(t *testing.T) {

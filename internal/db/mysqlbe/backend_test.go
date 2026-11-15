@@ -5,8 +5,8 @@ import (
 
 	drvmysql "github.com/go-sql-driver/mysql"
 
-	"github.com/dbcore/dbcore"
-	dbcoremysql "github.com/dbcore/dbcore/mysql"
+	"github.com/Ben-guanzhi/dbcore"
+	dbcoremysql "github.com/Ben-guanzhi/dbcore/mysql"
 )
 
 func TestConnSpec(t *testing.T) {

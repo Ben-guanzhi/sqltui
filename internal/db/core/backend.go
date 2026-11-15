@@ -16,8 +16,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dbcore/dbcore"
-	"github.com/dbcore/dbcore/sqltext"
+	"github.com/Ben-guanzhi/dbcore"
+	"github.com/Ben-guanzhi/dbcore/sqltext"
 
 	"github.com/LinPr/sqltui/internal/data"
 	"github.com/LinPr/sqltui/internal/db"

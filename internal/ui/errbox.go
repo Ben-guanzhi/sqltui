@@ -8,7 +8,7 @@ import (
 
 	"github.com/LinPr/sqltui/internal/theme"
 
-	"github.com/dbcore/dbcore/dberror"
+	"github.com/Ben-guanzhi/dbcore/dberror"
 )
 
 // errHint returns one actionable line for the error classes users can act on;
