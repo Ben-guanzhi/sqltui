@@ -441,6 +441,16 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.overlays = append(a.overlays, errBox{err: m.err})
 			return a, nil
 		}
+		// 0 affected rows on a keyed UPDATE is not "updated 0 row(s)": the guard
+		// (or the key) matched nothing, which means the row changed or vanished
+		// since this page was read. Say that, and refresh so the reader sees why.
+		if m.rows == 0 {
+			cmds := []tea.Cmd{a.setToast("not saved: the row changed since it was read")}
+			if a.backend != nil {
+				cmds = append(cmds, a.runCommand("refreshtable", ""))
+			}
+			return a, tea.Batch(cmds...)
+		}
 		cmds := []tea.Cmd{a.setToast(fmt.Sprintf("updated %d row(s)", m.rows))}
 		if a.backend != nil {
 			cmds = append(cmds, a.runCommand("refreshtable", ""))

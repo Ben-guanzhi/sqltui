@@ -9,10 +9,10 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/Ben-guanzhi/dbcore/usability"
 	"github.com/LinPr/sqltui/internal/config"
 	"github.com/LinPr/sqltui/internal/ui"
 	"github.com/LinPr/sqltui/internal/ui/popup" // register the base overlay factories
-	"github.com/Ben-guanzhi/dbcore/usability"
 )
 
 // Engine kinds accepted by Run.

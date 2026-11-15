@@ -142,7 +142,7 @@ func TestBuildUpdateSinglePK(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := `UPDATE "users" SET "name"='alice' WHERE "id"='1'`
+	want := `UPDATE "users" SET "name"='alice' WHERE "id"='1' AND "name"='ann'`
 	if got != want {
 		t.Errorf("pg buildUpdate = %q, want %q", got, want)
 	}
@@ -155,7 +155,7 @@ func TestBuildUpdateMysqlBacktick(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "UPDATE `users` SET `name`='zoe' WHERE `id`='2'"
+	want := "UPDATE `users` SET `name`='zoe' WHERE `id`='2' AND `name`='bob'"
 	if got != want {
 		t.Errorf("mysql buildUpdate = %q, want %q", got, want)
 	}
@@ -168,7 +168,7 @@ func TestBuildUpdateMultiPK(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := `UPDATE "t" SET "name"='x' WHERE "id"='3' AND "ns"='c'`
+	want := `UPDATE "t" SET "name"='x' WHERE "id"='3' AND "ns"='c' AND "name"='cyd'`
 	if got != want {
 		t.Errorf("multi-pk buildUpdate = %q, want %q", got, want)
 	}
@@ -395,12 +395,12 @@ func TestBuildUpdateBoundShapes(t *testing.T) {
 		stmt string
 		args []any
 	}{
-		{"postgres", `UPDATE "users" SET "name"=$1 WHERE "id"=$2`, []any{"x", int64(2)}},
-		{"mysql", "UPDATE `users` SET `name`=? WHERE `id`=?", []any{"x", int64(2)}},
+		{"postgres", `UPDATE "users" SET "name"=$1 WHERE "id"=$2 AND "name"=$3`, []any{"x", int64(2), "bob"}},
+		{"mysql", "UPDATE `users` SET `name`=? WHERE `id`=? AND `name`=?", []any{"x", int64(2), "bob"}},
 		// The stub has no Quoter, so identifiers render with the double-quote
 		// fallback; the placeholder spelling is what varies by engine here.
-		{"sqlserver", `UPDATE "users" SET "name"=@p1 WHERE "id"=@p2`, []any{"x", int64(2)}},
-		{"oracle", `UPDATE "users" SET "name"=:1 WHERE "id"=:2`, []any{"x", int64(2)}},
+		{"sqlserver", `UPDATE "users" SET "name"=@p1 WHERE "id"=@p2 AND "name"=@p3`, []any{"x", int64(2), "bob"}},
+		{"oracle", `UPDATE "users" SET "name"=:1 WHERE "id"=:2 AND "name"=:3`, []any{"x", int64(2), "bob"}},
 	}
 	for _, c := range cases {
 		be := &cellEditBackend{kind: c.kind}
@@ -429,12 +429,12 @@ func TestBuildUpdateBoundMultiPKAndErrors(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := `UPDATE "t" SET "name"=$1 WHERE "id"=$2 AND "ns"=$3`
+	want := `UPDATE "t" SET "name"=$1 WHERE "id"=$2 AND "ns"=$3 AND "name"=$4`
 	if stmt != want {
 		t.Errorf("stmt = %q, want %q", stmt, want)
 	}
-	if len(args) != 3 || args[1] != int64(3) || args[2] != "c" {
-		t.Errorf("args = %#v, want [x 3 c]", args)
+	if len(args) != 4 || args[1] != int64(3) || args[2] != "c" || args[3] != "cyd" {
+		t.Errorf("args = %#v, want [x 3 c cyd]", args)
 	}
 
 	if _, _, err := buildUpdateBound(pg, "t", nil, frame, 0, "name", "x"); err == nil || !strings.Contains(err.Error(), "no primary key") {
@@ -533,8 +533,8 @@ func TestCommitCellEditBoundPath(t *testing.T) {
 		t.Errorf("backend saw %q", be.last)
 	}
 	// The new value and the PK bind as native types, not quoted text.
-	if len(be.lastArgs) != 2 || be.lastArgs[0] != "zoe" || be.lastArgs[1] != int64(2) {
-		t.Errorf("args = %#v, want [zoe 2]", be.lastArgs)
+	if len(be.lastArgs) != 3 || be.lastArgs[0] != "zoe" || be.lastArgs[1] != int64(2) || be.lastArgs[2] != "bob" {
+		t.Errorf("args = %#v, want [zoe 2 bob]", be.lastArgs)
 	}
 }
 

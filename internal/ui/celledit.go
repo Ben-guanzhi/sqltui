@@ -169,7 +169,26 @@ func buildUpdate(be db.Backend, table string, pks []string, frame *data.Frame, r
 		}
 		where = append(where, quoteCol(be, pk)+"="+sqlLiteral(be, frame.CellString(row, idx)))
 	}
+	// The optimistic guard: the edited column must still hold what this frame
+	// read. Without it the WHERE only pins the key, so a cell someone else edited
+	// after the page was fetched would be overwritten without a word.
+	if col := frame.ColumnIndex(colName); col >= 0 {
+		if old := frame.CellString(row, col); !isNullCell(frame, row, col) {
+			where = append(where, quoteCol(be, colName)+"="+sqlLiteral(be, old))
+		} else {
+			where = append(where, quoteCol(be, colName)+" IS NULL")
+		}
+	}
 	return "UPDATE " + quoteIdent(be, table) + " SET " + setClause + " WHERE " + strings.Join(where, " AND "), nil
+}
+
+// isNullCell reports whether the frame holds SQL NULL at (row, col): the cell
+// prints as an empty string, but the guard has to compare with IS NULL.
+func isNullCell(frame *data.Frame, row, col int) bool {
+	if frame == nil || col < 0 || col >= frame.NumCols() || row < 0 || row >= frame.NumRows() {
+		return false
+	}
+	return frame.Columns[col].Cell(row) == nil
 }
 
 // buildDelete returns a DELETE keyed on the table's primary key. Single-PK
@@ -270,6 +289,16 @@ func buildUpdateBound(be db.Backend, table string, pks []string, frame *data.Fra
 		}
 		where = append(where, quoteCol(be, pk)+"="+placeholder(be, len(args)+1))
 		args = append(args, frame.Cell(row, pi))
+	}
+	// The optimistic guard: the edited column must still hold what this frame
+	// read (NULL compares with IS NULL, which binds nothing). Without it the
+	// WHERE pins only the key, and a cell someone else changed after the page was
+	// fetched would be overwritten silently.
+	if isNullCell(frame, row, ci) {
+		where = append(where, quoteCol(be, colName)+" IS NULL")
+	} else {
+		where = append(where, quoteCol(be, colName)+"="+placeholder(be, len(args)+1))
+		args = append(args, frame.Cell(row, ci))
 	}
 	stmt := "UPDATE " + quoteIdent(be, table) + " SET " + quoteCol(be, colName) + "=" + placeholder(be, 1) +
 		" WHERE " + strings.Join(where, " AND ")
