@@ -392,8 +392,14 @@ func (tv *TableView) Render(f *data.Frame, o RenderOpts) string {
 		for _, w := range widths[:len(widths)-1] {
 			used += w
 		}
-		if remaining := avail - used; remaining > widths[len(widths)-1] {
-			widths[len(widths)-1] = remaining
+		remaining := avail - used - widths[len(widths)-1]
+		// Only a column subset stretches: there the tail column is the detail
+		// view, and filling the screen with it is the point. With every column
+		// visible, [fit] means "size to content" — the leftover stays blank, the
+		// way psql and lazysql do it. Stretching one column instead made the
+		// widest one (comment) own two thirds of the screen.
+		if remaining > 0 && len(widths) < ncols {
+			widths[len(widths)-1] += remaining
 		}
 	}
 
