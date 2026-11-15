@@ -1,5 +1,8 @@
 # sqltui
 
+<img src="assets/icon.png" width="96" alt="sqltui">
+
+
 A lightweight terminal UI for viewing and querying tabular data — data files
 and live databases — with SQL, fuzzy search, plotting and theming built in.
 Written in Go on top of Bubble Tea v2.
