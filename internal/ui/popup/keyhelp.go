@@ -39,6 +39,8 @@ var keyHelpRows = []keyHelpRow{
 	{"backspace", "删除"},
 	// ---- 命令 ----
 	{":help", "打开/关闭本速查"},
+	{":fav", "收藏 / 取消收藏最近一条语句"},
+	{":favs", "看收藏列表"},
 	{":quit", "退出"},
 	{":reset", "重置当前窗格"},
 	{":toggleborders", "切换边框显示"},
