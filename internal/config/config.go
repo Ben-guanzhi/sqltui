@@ -260,14 +260,6 @@ func WriteRedisConfig(redisConfig *RedisConfig) error {
 	return WriteSection(getRedis, setRedis, redisConfig)
 }
 
-func ReadSqliteConfig() (*SqliteConfig, error) {
-	return ReadSection(getSqlite, setSqlite, defaultSqlite)
-}
-
-func WriteSqliteConfig(sqliteConfig *SqliteConfig) error {
-	return WriteSection(getSqlite, setSqlite, sqliteConfig)
-}
-
 func ReadPostgresConfig() (*PostgresConfig, error) {
 	return ReadSection(getPostgres, setPostgres, defaultPostgres)
 }
