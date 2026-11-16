@@ -78,6 +78,8 @@ func qxRunOnce(ctx ui.AppContext, sqlText string) (qxRunOutcome, error) {
 		if err != nil {
 			return qxRunOutcome{}, err
 		}
+		// 记历史：只记**成功的**执行（失败的重试会刷屏）。连接用页签标题。
+		ui.AppendHistory(sqlText, ctx.BaseCrumb())
 		if res.Frame != nil {
 			return qxRunOutcome{frame: res.Frame, truncated: res.Truncated}, nil
 		}
