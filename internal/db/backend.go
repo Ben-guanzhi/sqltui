@@ -162,6 +162,22 @@ type Canceler interface {
 	CancelRunning() bool
 }
 
+// ForeignKey describes one foreign-key edge: 引用者(from) 的列指向
+// 被引用者(to) 的列。ER 图用它连线。
+type ForeignKey struct {
+	FromTable  string
+	FromColumn string
+	ToTable    string
+	ToColumn   string
+}
+
+// ErBackend is the optional ability to list a schema's foreign keys — the
+// data an ER diagram draws. Backends that cannot introspect them answer
+// ErrNotSupported, and the ER view says so instead of drawing an empty box.
+type ErBackend interface {
+	ForeignKeys(namespace string) ([]ForeignKey, error)
+}
+
 // NamespaceWarmer is the optional ability to resolve the connected namespace
 // ahead of time. The resolution is a single-row query (postgres's
 // current_schema()); the app warms it the moment a connection lands, so the

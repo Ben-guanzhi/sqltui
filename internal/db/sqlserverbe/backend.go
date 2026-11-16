@@ -187,6 +187,38 @@ func (b *Backend) PrimaryKeys(namespace, table string) ([]string, error) {
 	return pks, nil
 }
 
+// ForeignKeys lists the schema's foreign-key edges (引用者 → 被引用者)，
+// 供 ER 图连线。SQL Server 的 INFORMATION_SCHEMA.KEY_COLUMN_USAGE 在
+// 外键列上带 REFERENCED_TABLE_NAME / REFERENCED_COLUMN_NAME。
+func (b *Backend) ForeignKeys(namespace string) ([]db.ForeignKey, error) {
+	query := `SELECT ku.TABLE_NAME, ku.COLUMN_NAME,
+			ku.REFERENCED_TABLE_NAME, ku.REFERENCED_COLUMN_NAME
+		FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE ku
+		WHERE ku.REFERENCED_TABLE_NAME IS NOT NULL`
+	var args []dbcore.Value
+	if namespace != "" {
+		query += ` AND ku.TABLE_CATALOG = @p1`
+		args = append(args, textArg(namespace))
+	}
+	res, err := b.query(query+" ORDER BY ku.TABLE_NAME, ku.ORDINAL_POSITION", args...)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]db.ForeignKey, 0, len(res.Rows))
+	for _, r := range res.Rows {
+		if len(r) < 4 {
+			continue
+		}
+		out = append(out, db.ForeignKey{
+			FromTable:  r[0].S,
+			FromColumn: r[1].S,
+			ToTable:    r[2].S,
+			ToColumn:   r[3].S,
+		})
+	}
+	return out, nil
+}
+
 // ColumnsMeta returns column metadata for database.table in ordinal order,
 // across the named database (empty = current database).
 func (b *Backend) ColumnsMeta(namespace, table string) ([]db.ColumnMeta, error) {
