@@ -11,6 +11,7 @@ package popup
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"sort"
 	"strings"
 	"time"
@@ -35,7 +36,17 @@ type backupOverlay struct {
 func init() {
 	ui.Factories["backup"] = func(ctx ui.AppContext, arg string) (ui.Overlay, error) {
 		ns := strings.TrimSpace(arg)
-		tables, err := ctx.Backend().Tables(ns)
+		be := ctx.Backend()
+
+		// MySQL / PostgreSQL：**优先走原生 dump 工具**（精确 schema，无行数
+		// 上限）——DumpBackend 是可选能力，mysqlbe/postgresbe 实现它。
+		if dumper, ok := be.(db.DumpBackend); ok {
+			info := dumper.DumpConn()
+			path := fmt.Sprintf("sqltui-dump-%s.sql", timeStamp())
+			return &externalDumpOverlay{info: info, path: path}, nil
+		}
+
+		tables, err := be.Tables(ns)
 		if err != nil {
 			return nil, fmt.Errorf("读表清单：%v", err)
 		}
@@ -114,4 +125,115 @@ func (o *backupOverlay) View(width, height int, th *theme.Theme) string {
 	}
 	b.WriteString(" " + th.Subtle.Render(" y 确认  ·  n 取消"))
 	return ui.Box("backup", b.String(), boxW, th)
+}
+
+// ---------------------------------------------------------------------------
+// MySQL / PostgreSQL：原生 dump 工具
+
+// externalDumpOverlay 是 mysqldump / pg_dump 的确认浮层。
+type externalDumpOverlay struct {
+	info db.DumpConnInfo
+	path string
+	err  string
+}
+
+func (o *externalDumpOverlay) Update(msg tea.Msg) (ui.Overlay, tea.Cmd) {
+	key, ok := msg.(tea.KeyPressMsg)
+	if !ok {
+		return o, nil
+	}
+	switch key.String() {
+	case "y", "Y", "enter":
+		if err := runNativeDump(o.info, o.path); err != nil {
+			o.err = err.Error()
+			return o, nil
+		}
+		return o, tea.Sequence(ui.CloseOverlay, func() tea.Msg {
+			return ui.ToastMsg{Text: fmt.Sprintf("备份已写入 %s", o.path)}
+		})
+	case "n", "N", "esc", "ctrl+c":
+		return o, ui.CloseOverlay
+	}
+	return o, nil
+}
+
+// runNativeDump 调 mysqldump / pg_dump。**口令走环境变量，绝不进 argv**。
+func runNativeDump(info db.DumpConnInfo, path string) error {
+	var tool string
+	var args []string
+	var envKey string
+	switch info.Engine {
+	case "mysql":
+		tool = "mysqldump"
+		envKey = "MYSQL_PWD"
+		args = []string{
+			"--single-transaction", "--quick", "--add-drop-table",
+			fmt.Sprintf("--host=%s", info.Host),
+			fmt.Sprintf("--port=%s", info.Port),
+			fmt.Sprintf("--user=%s", info.User),
+			"--protocol=TCP",
+			fmt.Sprintf("--result-file=%s", path),
+			info.Database,
+		}
+	case "postgres":
+		tool = "pg_dump"
+		envKey = "PGPASSWORD"
+		args = []string{
+			"--clean", "--if-exists",
+			fmt.Sprintf("--host=%s", info.Host),
+			fmt.Sprintf("--port=%s", info.Port),
+			fmt.Sprintf("--username=%s", info.User),
+			fmt.Sprintf("--dbname=%s", info.Database),
+			fmt.Sprintf("--file=%s", path),
+		}
+	default:
+		return fmt.Errorf("不支持的引擎 %q", info.Engine)
+	}
+	cmd := exec.Command(tool, args...)
+	cmd.Env = append(os.Environ(), envKey+"="+info.Password)
+	out, err := cmd.Output()
+	if err != nil {
+		msg := ""
+		if ee, ok := err.(*exec.ExitError); ok {
+			msg = strings.TrimSpace(string(ee.Stderr))
+			if i := strings.IndexByte(msg, '\n'); i >= 0 {
+				msg = msg[:i]
+			}
+		}
+		return fmt.Errorf("%s 失败：%s%s", tool, err, msg)
+	}
+	_ = out
+	// 产物校验：空文件判失败。
+	fi, err := os.Stat(path)
+	if err != nil {
+		return fmt.Errorf("备份产物不存在：%v", err)
+	}
+	if fi.Size() == 0 {
+		return fmt.Errorf("备份产物是空文件（工具没写出任何东西）")
+	}
+	return nil
+}
+
+func (o *externalDumpOverlay) View(width, height int, th *theme.Theme) string {
+	boxW := 72
+	if boxW > width-4 && width-4 >= 24 {
+		boxW = width - 4
+	}
+	var b strings.Builder
+	b.WriteString(" " + th.Text.Render("备份数据库（原生 dump 工具）") + "\n")
+	b.WriteString(" " + fmt.Sprintf("%s %s@%s:%s/%s", info_engine(o.info), o.info.User, o.info.Host, o.info.Port, o.info.Database) + "\n")
+	b.WriteString(" " + fmt.Sprintf("写入 %s", o.path) + "\n")
+	b.WriteString(" " + th.Subtle.Render("口令经环境变量传递，不出现在命令行。") + "\n")
+	if o.err != "" {
+		b.WriteString(" " + th.Error.Render(o.err) + "\n")
+	}
+	b.WriteString(" " + th.Subtle.Render(" y 确认  ·  n 取消"))
+	return ui.Box("backup-native", b.String(), boxW, th)
+}
+
+func info_engine(info db.DumpConnInfo) string {
+	if info.Engine == "mysql" {
+		return "mysqldump"
+	}
+	return "pg_dump"
 }

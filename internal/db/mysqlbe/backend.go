@@ -48,6 +48,8 @@ func (c Config) ConnSpec() dbcore.ConnSpec {
 // Backend adapts the kernel mysql driver to the db.Backend contract.
 type Backend struct {
 	*core.Backend
+	// dumpInfo 是 mysqldump 需要的连接参数（:backup 优先走原生工具）。
+	dumpInfo db.DumpConnInfo
 }
 
 var (
@@ -76,8 +78,18 @@ func Connect(ctx context.Context, cfg Config) (*Backend, error) {
 		Target:          Target,
 		CurrentNS:       func(context.Context) (string, error) { return strings.TrimSpace(cfg.DbName), nil },
 		HasLastInsertID: true,
-	})}, nil
+	}), dumpInfo: db.DumpConnInfo{
+		Engine:   "mysql",
+		Host:     cfg.Host,
+		Port:     cfg.Port,
+		User:     cfg.UserName,
+		Password: cfg.Password,
+		Database: cfg.DbName,
+	}}, nil
 }
+
+// DumpConn 供 :backup 优先走 mysqldump（精确 schema，无行数上限）。
+func (b *Backend) DumpConn() db.DumpConnInfo { return b.dumpInfo }
 
 // Target spells namespace.table as `ns`.`tbl` (each part kernel-quoted); an
 // empty namespace yields just `tbl`, which resolves on the connection's

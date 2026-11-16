@@ -19,8 +19,27 @@ import (
 	"github.com/LinPr/sqltui/internal/data"
 )
 
-/// 一次取多少行（FetchTable 的上限就是 10000）。
+// / 一次取多少行（FetchTable 的上限就是 10000）。
 const backupRowLimit = 10000
+
+// DumpConnInfo 是**外部 dump 工具**需要的连接参数。口令经
+// MYSQL_PWD / PGPASSWORD 环境变量传递，**绝不进 argv**——argv 对同机任何
+// 进程可见（任务管理器、/proc），那是密码的泄露面。
+type DumpConnInfo struct {
+	Engine   string // "mysql" | "postgres"
+	Host     string
+	Port     string
+	User     string
+	Password string
+	Database string
+}
+
+// DumpBackend 是可选能力：后端能给出外部 dump 工具需要的连接参数。
+// MySQL/PostgreSQL 实现它，:backup 就优先走原生工具（精确 schema，
+// 无 10000 行上限）；SQLite 与不支持的后端不实现，:backup 走 DDL 反推。
+type DumpBackend interface {
+	DumpConn() DumpConnInfo
+}
 
 // QuoteBackupIdent 用双引号包标识符（内部双引号翻倍）——SQL 标准转义。
 func QuoteBackupIdent(s string) string {
@@ -34,9 +53,9 @@ func QuoteBackupLiteral(s string) string {
 
 // BackupTable 一个表的 DDL + 分批读数据的回调形态，供后端适配。
 type BackupTable struct {
-	Name  string
-	Cols  []ColumnMeta
-	PKs   []string
+	Name string
+	Cols []ColumnMeta
+	PKs  []string
 }
 
 // BackupBackend 是可选的备份能力：枚举表 + 读列 + 取页。

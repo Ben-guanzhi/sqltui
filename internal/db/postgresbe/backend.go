@@ -54,6 +54,8 @@ func (c Config) ConnSpec() dbcore.ConnSpec {
 // Backend adapts the kernel postgres driver to the db.Backend contract.
 type Backend struct {
 	*core.Backend
+	// dumpInfo 是 pg_dump 需要的连接参数（:backup 优先走原生工具）。
+	dumpInfo db.DumpConnInfo
 }
 
 var (
@@ -82,8 +84,18 @@ func Connect(ctx context.Context, cfg Config) (*Backend, error) {
 		// (usually "public"); the query keeps working after ALTER ROLE ... SET
 		// search_path, unlike a hard-coded name.
 		CurrentNS: core.CurrentNSQuery(sql, "SELECT current_schema()"),
-	})}, nil
+	}), dumpInfo: db.DumpConnInfo{
+		Engine:   "postgres",
+		Host:     cfg.Host,
+		Port:     cfg.Port,
+		User:     cfg.UserName,
+		Password: cfg.Password,
+		Database: cfg.DbName,
+	}}, nil
 }
+
+// DumpConn 供 :backup 优先走 pg_dump（精确 schema，无行数上限）。
+func (b *Backend) DumpConn() db.DumpConnInfo { return b.dumpInfo }
 
 // Target spells namespace.table as "ns"."tbl" with kernel-quoted parts; an
 // empty namespace yields just "tbl", which resolves on the search path.

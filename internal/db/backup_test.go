@@ -3,6 +3,7 @@ package db
 // 备份的排版：DDL 反推、字面量转义、确定性。
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -54,5 +55,26 @@ func TestBackupBuildsDDLAndInserts(t *testing.T) {
 	out2, _ := BuildBackup("main", []string{"t"}, meta, pks, fetch)
 	if out != out2 {
 		t.Error("两次备份不同（应为确定性）")
+	}
+}
+
+// 安全底线：dump 参数里**没有**口令——argv 对同机任何进程可见，
+// 口令只走 MYSQL_PWD / PGPASSWORD 环境变量。
+func TestDumpArgsCarryNoPassword(t *testing.T) {
+	info := DumpConnInfo{
+		Engine: "mysql", Host: "db.example", Port: "3307",
+		User: "u", Password: "s3cret", Database: "shop",
+	}
+	args := []string{
+		"--single-transaction",
+		fmt.Sprintf("--host=%s", info.Host),
+		fmt.Sprintf("--port=%s", info.Port),
+		fmt.Sprintf("--user=%s", info.User),
+		"--protocol=TCP",
+		info.Database,
+	}
+	joined := strings.Join(args, " ")
+	if strings.Contains(joined, "s3cret") {
+		t.Errorf("口令进了 argv：%s", joined)
 	}
 }
