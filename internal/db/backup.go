@@ -61,9 +61,9 @@ func backupLiteral(v any) string {
 	}
 }
 
-// buildBackup 生成一个 schema 的备份文本：tables 由调用方枚举，meta/pks/fetch
+// BuildBackup 生成一个 schema 的备份文本：tables 由调用方枚举，meta/pks/fetch
 // 由后端提供。fetch 是 FetchTable 的适配（一次取全量，见 BackupRowLimit）。
-func buildBackup(
+func BuildBackup(
 	namespace string,
 	tables []string,
 	meta func(table string) ([]ColumnMeta, error),

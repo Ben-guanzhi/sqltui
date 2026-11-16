@@ -34,7 +34,7 @@ func TestBackupBuildsDDLAndInserts(t *testing.T) {
 	frame.AppendRow([]any{int64(2), "a'b"})
 	fetch := func(ns, table string, limit int) (*data.Frame, error) { return frame, nil }
 
-	out, err := buildBackup("main", []string{"t"}, meta, pks, fetch)
+	out, err := BuildBackup("main", []string{"t"}, meta, pks, fetch)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +51,7 @@ func TestBackupBuildsDDLAndInserts(t *testing.T) {
 		}
 	}
 	// 确定性：两次相同。
-	out2, _ := buildBackup("main", []string{"t"}, meta, pks, fetch)
+	out2, _ := BuildBackup("main", []string{"t"}, meta, pks, fetch)
 	if out != out2 {
 		t.Error("两次备份不同（应为确定性）")
 	}
