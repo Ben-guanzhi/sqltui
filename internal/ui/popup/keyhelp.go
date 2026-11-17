@@ -43,6 +43,7 @@ var keyHelpRows = []keyHelpRow{
 	{":favs", "看收藏列表"},
 	{":snip <名字>", "把最近一条语句存为命名片段"},
 	{":snips", "片段列表（Enter 载入 :query）"},
+	{":procs", "服务器会话列表（Enter 杀，两步确认）"},
 	{":quit", "退出"},
 	{":reset", "重置当前窗格"},
 	{":toggleborders", "切换边框显示"},

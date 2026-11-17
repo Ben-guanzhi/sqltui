@@ -228,6 +228,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				_ = a.backend.Close() // superseded: a reconnect replaces it
 			}
 			a.backend = m.Backend
+			// 会话管理能力随连接切换：backend 能暴露内核驱动则断言
+			// ProcessLister（MySQL/PG/MSSQL 支持，其它自然降级为不支持）。
+			SetProcessListerForBackend(m.Backend)
 			// The completion cache pins the backend it was warmed against; a
 			// new connection must rebind it and drop the stale snapshot, or
 			// sheet type rows silently degrade and every warm fetch is
