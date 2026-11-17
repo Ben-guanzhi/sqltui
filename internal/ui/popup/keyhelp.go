@@ -44,6 +44,7 @@ var keyHelpRows = []keyHelpRow{
 	{":snip <名字>", "把最近一条语句存为命名片段"},
 	{":snips", "片段列表（Enter 载入 :query）"},
 	{":procs", "服务器会话列表（Enter 杀，两步确认）"},
+	{":vars", "服务器系统变量（只读，输入即过滤）"},
 	{":quit", "退出"},
 	{":reset", "重置当前窗格"},
 	{":toggleborders", "切换边框显示"},

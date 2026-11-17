@@ -22,6 +22,7 @@ var errProcNotSupported = errors.New("当前引擎不支持会话管理（需要
 var (
 	procMu     sync.Mutex
 	procLister dbcore.ProcessLister
+	svReader   dbcore.ServerVariablesReader
 )
 
 // driverExposed 是「能暴露内核驱动」的 backend 的小接口——core.Backend 实现
@@ -31,16 +32,36 @@ type driverExposed interface {
 }
 
 // SetProcessListerForBackend 在连接就绪/SetBackend 时调用：backend 能暴露
-// 内核驱动则断言 ProcessLister 能力，否则清空（不支持）。
+// 内核驱动则断言 ProcessLister + ServerVariables 能力，否则清空（不支持）。
 func SetProcessListerForBackend(b any) {
 	procMu.Lock()
 	defer procMu.Unlock()
 	procLister = nil
+	svReader = nil
 	if d, ok := b.(driverExposed); ok {
-		if pl, ok := dbcore.AsProcessLister(d.Driver()); ok {
+		drv := d.Driver()
+		if pl, ok := dbcore.AsProcessLister(drv); ok {
 			procLister = pl
 		}
+		if sv, ok := dbcore.AsServerVariables(drv); ok {
+			svReader = sv
+		}
 	}
+}
+
+// ListServerVariables 拉当前服务器的系统变量（15s 超时；只读）。
+func ListServerVariables() ([]dbcore.ServerVariable, error) {
+	procMu.Lock()
+	sv := svReader
+	procMu.Unlock()
+	if sv == nil {
+		return nil, errProcNotSupported
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	vars, err := sv.ServerVariables(ctx)
+	dbcore.SortVariables(vars)
+	return vars, err
 }
 
 // SetProcessLister 直接注入能力（测试用）。
