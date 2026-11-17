@@ -618,6 +618,9 @@ func FrameFromResult(res *dbcore.QueryResult) *data.Frame {
 		names[i] = c.Name
 	}
 	f := data.New(names...)
+	// 携带截断标记：exporter 只拿到 frame，没有它就无法在导出时说明「只导出了
+	// 已载入的部分」。
+	f.Truncated = res.Truncated
 	for _, row := range res.Rows {
 		cells := make([]any, len(row))
 		for i, v := range row {

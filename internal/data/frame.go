@@ -85,6 +85,11 @@ func (c Column) Values() []any {
 // "published frames don't change" true by construction).
 type Frame struct {
 	Columns []Column
+	// Truncated marks a frame assembled from a row-set that hit the engine's
+	// row cap (AdHocRowLimit / DriverMaxRows): the frame holds only the first
+	// N rows. 导出时必须说明——静默导出被截断的 frame = 用户以为拿到全量，
+	// 实际少了后面的行。零值 false 对既有调用方无影响。
+	Truncated bool
 }
 
 // New creates an empty frame with the given column names, all string-typed.

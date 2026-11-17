@@ -366,8 +366,14 @@ func (e *exporter) doWrite(dst string) tea.Cmd {
 		e.step = exportStepPath
 		return exportErrCmd(fmt.Errorf("export failed: %w", werr))
 	}
+	// 结果可能被行数上限截断——导出的是 frame 里已载入的那部分。说明它，
+	// 否则用户以为拿到全量，实际少了后面的行。
+	note := ""
+	if frame != nil && frame.Truncated {
+		note = " (exported loaded rows only — result was truncated)"
+	}
 	return tea.Batch(
-		func() tea.Msg { return ui.ToastMsg{Text: "exported to " + dst} },
+		func() tea.Msg { return ui.ToastMsg{Text: "exported to " + dst + note} },
 		ui.CloseOverlay,
 	)
 }
