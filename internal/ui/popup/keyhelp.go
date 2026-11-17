@@ -41,6 +41,8 @@ var keyHelpRows = []keyHelpRow{
 	{":help", "打开/关闭本速查"},
 	{":fav", "收藏 / 取消收藏最近一条语句"},
 	{":favs", "看收藏列表"},
+	{":snip <名字>", "把最近一条语句存为命名片段"},
+	{":snips", "片段列表（Enter 载入 :query）"},
 	{":quit", "退出"},
 	{":reset", "重置当前窗格"},
 	{":toggleborders", "切换边框显示"},
