@@ -444,7 +444,9 @@ func SetDefaultLog() error {
 		flag = os.O_CREATE | os.O_WRONLY | os.O_TRUNC
 	}
 
-	file, err := os.OpenFile(LogFile, flag, 0644)
+	// 日志可能记录查询语句与错误（含数据片段）——0600 而非 0644，同机其他
+	// 用户不应能读。OpenFile 对已存在文件不改权限，用户若主动放宽不会被覆盖。
+	file, err := os.OpenFile(LogFile, flag, 0600)
 	if err != nil {
 		return err
 	}
