@@ -3,6 +3,7 @@ package writer
 import (
 	"encoding/csv"
 	"io"
+	"strconv"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -42,6 +43,24 @@ func (cw csvWriter) Write(w io.Writer, f *data.Frame, opt Options) error {
 	return writeCustomQuoteCsv(w, f, opt, sep, quote)
 }
 
+// formulaGuard 防 CSV 公式注入（OWASP CSV Injection）：以 = + - @ 或制表/回车
+// 开头的单元格在 Excel / LibreOffice 里会被当公式执行（=cmd|… 可触发命令）。
+// 前缀单引号使其按文本显示；纯数字字面量豁免（-5、+3 不动），否则破坏用户的
+// 数值计算。
+func formulaGuard(s string) string {
+	if s == "" {
+		return s
+	}
+	if _, err := strconv.ParseFloat(s, 64); err == nil {
+		return s
+	}
+	switch s[0] {
+	case '=', '+', '-', '@', '\t', '\r':
+		return "'" + s
+	}
+	return s
+}
+
 // writeStdCsv 用 encoding/csv 写出默认双引号 CSV/TSV（保持原有实现与
 // golden 输出不变）。
 func writeStdCsv(w io.Writer, f *data.Frame, opt Options, sep rune) error {
@@ -56,7 +75,7 @@ func writeStdCsv(w io.Writer, f *data.Frame, opt Options, sep rune) error {
 	record := make([]string, f.NumCols())
 	for r := 0; r < f.NumRows(); r++ {
 		for c := range f.Columns {
-			record[c] = data.FormatValue(f.Cell(r, c))
+			record[c] = formulaGuard(data.FormatValue(f.Cell(r, c)))
 		}
 		if err := enc.Write(record); err != nil {
 			return err
@@ -97,7 +116,7 @@ func writeCustomQuoteCsv(w io.Writer, f *data.Frame, opt Options, sep, quote run
 	record := make([]string, f.NumCols())
 	for r := 0; r < f.NumRows(); r++ {
 		for c := range f.Columns {
-			record[c] = data.FormatValue(f.Cell(r, c))
+			record[c] = formulaGuard(data.FormatValue(f.Cell(r, c)))
 		}
 		writeRecord(record)
 	}
