@@ -26,8 +26,8 @@ func init() {
 		if i := strings.IndexByte(head, '\n'); i >= 0 {
 			head = head[:i]
 		}
-		if len(head) > 60 {
-			head = head[:57] + "…"
+		if r := []rune(head); len(r) > 60 {
+			head = string(r[:57]) + "…"
 		}
 		mark := "☆ 已取消收藏"
 		if fav {
