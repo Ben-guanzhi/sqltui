@@ -45,6 +45,7 @@ var keyHelpRows = []keyHelpRow{
 	{":snips", "片段列表（Enter 载入 :query）"},
 	{":procs", "服务器会话列表（Enter 杀，两步确认）"},
 	{":vars", "服务器系统变量（只读，输入即过滤）"},
+	{":dict", "导出数据字典到 Markdown（0600）"},
 	{":quit", "退出"},
 	{":reset", "重置当前窗格"},
 	{":toggleborders", "切换边框显示"},
