@@ -6,6 +6,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/Ben-guanzhi/dbcore/sqlrisk"
 	"github.com/LinPr/sqltui/internal/data"
 	"github.com/LinPr/sqltui/internal/query"
 	"github.com/LinPr/sqltui/internal/theme"
@@ -193,6 +194,15 @@ func (e *qxEditor) Update(msg tea.Msg) (ui.Overlay, tea.Cmd) {
 				return e, func() tea.Msg { return ui.ErrorMsg{Err: err} }
 			}
 			sqlText = wrapped
+		}
+		// DataGrip 的危险语句确认（§344）：destructive 分级的语句不直接跑，
+		// 先弹出内核 sqlrisk 的摘要（影响半径 + 首条原因），y 确认后经
+		// RunCommandMsg 交回 query 管道照常执行。
+		if r := sqlrisk.Assess(sqlText); r.Level == sqlrisk.LevelDestructive {
+			ov := newConfirmRiskOverlay(e.ctx, sqlText, nil)
+			return e, tea.Batch(ui.CloseOverlay, func() tea.Msg {
+				return ui.PushOverlayMsg{Overlay: ov}
+			})
 		}
 		run := qxRunCmd(e.ctx, sqlText, func(f *data.Frame) tea.Msg {
 			return ui.ApplyFrameMsg{

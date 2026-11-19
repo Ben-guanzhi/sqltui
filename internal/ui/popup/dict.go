@@ -10,10 +10,10 @@ package popup
 import (
 	"context"
 	"fmt"
-	"time"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -53,11 +53,11 @@ func init() {
 
 // dictOverlay 的编辑态：path 输入框 + 状态。
 type dictOverlay struct {
-	ctx    ui.AppContext
-	drv    dbcore.SQLDriver
-	ns     string
-	path   string
-	err string
+	ctx  ui.AppContext
+	drv  dbcore.SQLDriver
+	ns   string
+	path string
+	err  string
 }
 
 func expandDictPath(p string) string {
