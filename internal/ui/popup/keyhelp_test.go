@@ -17,7 +17,7 @@ func TestKeyHelpListsTheCommands(t *testing.T) {
 	th := theme.Default()
 	view := k.View(80, 30, th)
 	// 表里的关键条目都要出现——加键却漏了速查，正是这个模式要防的。
-	for _, want := range []string{":help", ":quit", ":toggleborders", ":dict", ":indexes", "ctrl+s", "esc", "j / ↓"} {
+	for _, want := range []string{":help", ":quit", ":toggleborders", ":dict", ":indexes", ":gendata", "ctrl+s", "esc", "j / ↓"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("速查里没有 %q；\n%s", want, view)
 		}

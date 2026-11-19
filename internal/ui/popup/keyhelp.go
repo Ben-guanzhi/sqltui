@@ -47,6 +47,7 @@ var keyHelpRows = []keyHelpRow{
 	{":vars", "服务器系统变量（只读，输入即过滤）"},
 	{":dict", "导出数据字典到 Markdown（0600）"},
 	{":indexes <表名>", "索引浏览，Enter×2 生成 DROP INDEX"},
+	{":gendata <表名>", "生成测试数据 INSERT 进编辑器"},
 	{":quit", "退出"},
 	{":reset", "重置当前窗格"},
 	{":toggleborders", "切换边框显示"},
