@@ -20,6 +20,7 @@ import (
 
 	"github.com/LinPr/sqltui/internal/data"
 	"github.com/LinPr/sqltui/internal/db"
+	dbcore "github.com/LinPr/sqltui/internal/db/core"
 	"github.com/LinPr/sqltui/internal/query"
 	"github.com/LinPr/sqltui/internal/theme"
 	"github.com/LinPr/sqltui/internal/ui"
@@ -107,6 +108,11 @@ func qxRunOnce(ctx ui.AppContext, sqlText string) (qxRunOutcome, error) {
 // 波 97（DataGrip 惯例）：耗时跟结果走——row-set 的页签标题带 `· Nms` 后缀，
 // DML 的 toast 带耗时。S-01 记录的是同一时钟，两处一致。
 func qxRunCmd(ctx ui.AppContext, sqlText string, onFrame func(*data.Frame) tea.Msg) tea.Cmd {
+	// A backend that answers one statement with several grids opens one tab per
+	// set; single-set engines keep the ordinary path below.
+	if mr, ok := ctx.Backend().(db.MultiRunner); ok {
+		return qxRunMultiCmd(ctx, mr, sqlText, onFrame)
+	}
 	return func() tea.Msg {
 		frame, info, truncated, err, elapsed := qxRun(ctx, sqlText)
 		switch {
@@ -260,6 +266,44 @@ func qxSchemaOf(ctx ui.AppContext) query.Schema {
 func qxWarm(ctx ui.AppContext, tables ...string) {
 	if w, ok := ctx.(qxSchemaWarmer); ok {
 		w.WarmCompletionSchema(tables...)
+	}
+}
+
+// qxRunMultiCmd runs a statement through the multi-capable backend and emits
+// one ApplyFrameMsg per result set in emission order (结果集 1/N ...).
+func qxRunMultiCmd(ctx ui.AppContext, mr db.MultiRunner, sqlText string, onFrame func(*data.Frame) tea.Msg) tea.Cmd {
+	return func() tea.Msg {
+		started := time.Now()
+		sets, err := mr.RunMulti(context.Background(), sqlText)
+		if err != nil {
+			return ui.ErrorMsg{Err: err}
+		}
+		if len(sets) == 0 {
+			return ui.ToastMsg{Text: "ok · " + time.Since(started).Round(time.Millisecond).String()}
+		}
+		ui.AppendHistory(sqlText, ctx.BaseCrumb())
+		cmds := make([]tea.Cmd, 0, len(sets))
+		for i, res := range sets {
+			f := dbcore.FrameFromResult(res) // core.FrameFromResult — reuse the kernel→Frame conversion
+			if f == nil || len(f.Columns) == 0 {
+				continue // exec-only set: no grid
+			}
+			title := qxShortTitle(sqlText)
+			if len(sets) > 1 {
+				title = fmt.Sprintf("%s · 结果集 %d/%d", title, i+1, len(sets))
+			}
+			msg := onFrame(f)
+			if af, ok := msg.(ui.ApplyFrameMsg); ok {
+				af.NewTab = true
+				af.TabTitle = title
+				msg = af
+			}
+			cmds = append(cmds, func() tea.Msg { return msg })
+		}
+		if len(cmds) == 0 {
+			return ui.ToastMsg{Text: "ok · " + time.Since(started).Round(time.Millisecond).String()}
+		}
+		return tea.Sequence(cmds...)()
 	}
 }
 

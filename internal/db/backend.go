@@ -4,6 +4,7 @@ package db
 
 import (
 	"context"
+	"github.com/Ben-guanzhi/dbcore"
 
 	"github.com/LinPr/sqltui/internal/data"
 )
@@ -66,6 +67,14 @@ type Backend interface {
 	// Returns an empty map (not an error) when the table has no indexes.
 	ColumnIndexTypes(namespace, table string) (map[string]string, error)
 	Close() error
+}
+
+// MultiRunner is optionally implemented by a Backend whose driver can answer
+// one statement with several result sets (SQL Server batches / stored
+// procedures, MySQL CALL). The host opens one tab per set; engines that carry
+// one set per statement keep the ordinary Run path.
+type MultiRunner interface {
+	RunMulti(ctx context.Context, query string) ([]*dbcore.QueryResult, error)
 }
 
 // KVBackend is a live key-value store connection (Redis).
