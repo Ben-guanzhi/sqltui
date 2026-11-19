@@ -160,6 +160,29 @@ func (b *Backend) RunQuery(ctx context.Context, run func(context.Context) (*dbco
 	return run(ctx)
 }
 
+// RunMulti executes one statement and returns EVERY result set it answers
+// with (SQL Server batches, stored procedures, MySQL CALL). The multi-capable
+// driver path is opt-in via the kernel's MultiResultReader; engines whose
+// statements carry only one set fall back to the single Execute, which is the
+// truth for them. A mid-walk error keeps the sets already read (the kernel's
+// contract) and surfaces it on the last one.
+func (b *Backend) RunMulti(ctx context.Context, query string) ([]*dbcore.QueryResult, error) {
+	ctx, cancel := context.WithTimeout(ctx, QueryTimeout)
+	clear := b.cancelReg.Track(cancel)
+	defer clear()
+	if m, ok := dbcore.AsMultiResult(b.drv); ok {
+		sets, err := m.ExecuteMulti(ctx, query)
+		if len(sets) > 0 || err != nil {
+			return sets, err
+		}
+	}
+	res, err := b.drv.Execute(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	return []*dbcore.QueryResult{res}, nil
+}
+
 // result maps a kernel QueryResult onto the sqltui Result shape: a column
 // list means rows came back, anything else is an exec outcome.
 func (b *Backend) result(res *dbcore.QueryResult) db.Result {
