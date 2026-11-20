@@ -255,3 +255,23 @@ func cellEqual(a, b any) bool {
 	}
 	return a == b
 }
+
+// 前导零是数据（§354）：SKU/邮编/固定宽度编号 "007"/"00123" 不能推断成
+// int——否则 007 变 7，导出/回写时再也找不回原来的标识。
+func TestInferFrameKeepsLeadingZerosAsText(t *testing.T) {
+	f := &Frame{Columns: []Column{
+		{Name: "sku", Type: TypeString, cells: []any{"007", "00123", "9"}},
+		{Name: "plain", Type: TypeString, cells: []any{"1", "2", "3"}},
+	}}
+	out := InferFrame(f, "safe", nil)
+	if out.Columns[0].Type != TypeString {
+		t.Fatalf("leading-zero column inferred as %v, want string", out.Columns[0].Type)
+	}
+	if got := out.Columns[0].Cell(0); got != "007" {
+		t.Fatalf("sku = %v, want 007", got)
+	}
+	// 普通整数列仍正常推断。
+	if out.Columns[1].Type != TypeInt || out.Columns[1].Cell(0) != int64(1) {
+		t.Fatalf("plain int column = %v / %v", out.Columns[1].Type, out.Columns[1].Cell(0))
+	}
+}

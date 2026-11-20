@@ -155,6 +155,12 @@ func isProbablyParsable(s string, t DType) bool {
 		if s == "" {
 			return false
 		}
+		// 前导零是数据，不是记数法（§354）：SKU/邮编/固定宽度编号常写成
+		// "007" / "00123"——推断成 int 后前导零永远丢失。拒绝这种形状，
+		// 让整列保持 TEXT（与主流 SQL 客户端的导入惯例一致）。
+		if len(s) > 1 && s[0] == '0' {
+			return false
+		}
 		for i := 0; i < len(s); i++ {
 			if s[i] < '0' || s[i] > '9' {
 				return false
@@ -176,6 +182,11 @@ func floatLike(s string) bool {
 	i := 0
 	if i < len(s) && (s[i] == '-' || s[i] == '+') {
 		i++
+	}
+	// 前导零（"007"/"00123"）是标识文本而非记数法：和 int 分支同理，
+	// float 推断也必须拒绝，否则整列会从 TEXT 变成 7/123。
+	if len(s)-i > 1 && s[i] == '0' && s[i+1] >= '0' && s[i+1] <= '9' {
+		return false
 	}
 	digits := 0
 	for i < len(s) && s[i] >= '0' && s[i] <= '9' {
